@@ -1,6 +1,6 @@
 # Blobbo and Chrono architecture
 
-> This file describes the architecture that is **actually implemented in the shipping-game project**. `PLAN.md` defines the target product and milestone order. `PROJECT_STRUCTURE.md` defines ownership, promotion, tests, and Nu-native authoring boundaries.
+> This file describes the architecture that is **actually implemented in the shipping-game project**. `PLAN.md` defines the target product and milestone order; `EXPERIENCE_AND_MEDIA.md` is its scoped 2026-09-11 experience/media amendment. `PROJECT_STRUCTURE.md` defines ownership, promotion, tests, and Nu-native authoring boundaries.
 
 ## Project boundary
 
@@ -44,13 +44,17 @@ An optional future developer export may serialize a generated segment for inspec
 
 Nu remains the host for the window, render loop, and lifecycle. `CompositionRoot` is a runnable integration shell started and stopped by `Program`; gameplay installs a shared instance, pumps browser audio without blocking, and renders latest snapshot status.
 
-* **Browser.** Desktop builds use an external browser process/extension and a transparent top-level overlay; mobile builds may provide an owned browser and composited surfaces. Both are represented by the narrow `IBrowserBridge` contract and `BrowserEvent` values. Platform window handles and IPC stay outside this project.
+* **Browser.** The interface is designed for an external browser process/extension and transparent top-level overlay on desktop, or an owned browser and composited surfaces on mobile. These are intended platform routes, not implemented adapters. Both are represented by the narrow `IBrowserBridge` contract and `BrowserEvent` values. Platform window handles and IPC stay outside this project.
 * **Audio.** `AudioIngress.Submit` accepts mono 48 kHz analysis samples, copies them into bounded, preallocated analysis and playback rings, and advances an authoritative `int64` source-sample clock. Each slot carries its absolute start position and valid count; producers drop new blocks under backpressure and consumers detect discontinuities. Playback timing uses the same mono clock; a future stereo adapter may interleave playback samples. `CompositionRoot.TryReadPlayback` exposes an allocation-free, non-blocking count/absolute-position drain for the private delayed-playback ring.
 * **MuScriptor seam.** `MuScriptorCoordinator` consumes independent five-second windows with 300 ms overlap and emits sample-positioned symbolic events. Defaults are `prelude_forcing=false`, beam 1, batch 1. `ISymbolicInference` is a placeholder seam for a future model and has no runtime dependency today.
 * **Simulation shell.** `SimulationWorker` currently translates symbolic events into immutable render snapshots. Rendering reads the latest snapshot without taking a lock.
 * **Scene composition.** `Gameplay.fs` loads the Nu-native `Assets/Gameplay/Scene.nugroup`, renders a temporary static model and diagnostic button, and does not yet contain the production Blobbo journey loop.
 
 `NullBrowserBridge` and `NullInference` make the shell build and run offline. Failure and overload are isolated to the corresponding bounded queue; platform browser/audio/model adapters, click-through focus policy, and native compositing remain to be implemented per platform. The desktop shell already requests SDL transparent and always-on-top window flags. Start/stop operations are idempotent and serialized; worker shutdown joins fully. A future inference adapter that cannot be interrupted must be treated as a non-restartable fault.
+
+### 2026-09-11 source-review clarification
+
+At baseline commit `7d7840461cbd1118da52c4e6f02cfbc6a82474a9`, the composition root defaults to `NullBrowserBridge`; the existence of browser events, overlay flags and PCM rings does not demonstrate a functioning desktop extension or mobile browser fork. The PCM copying and delayed-output seams also make a future implementation more than a bookmark manager. A complete synchronised playback scheduler, provider-specific processing permissions and a release capability boundary are not implemented or validated by this documentation pass. See `EXPERIENCE_AND_MEDIA.md` for the proposal and review requirements; no runtime behaviour changed here.
 
 ## Known prototype assumptions to replace through the plan
 

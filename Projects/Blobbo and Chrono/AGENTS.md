@@ -14,7 +14,8 @@ Before changing this project:
 1. Read the repository-root `AGENTS.md` and the routed skills under `.agents/skills/`. The canonical skill
    path is `.agents/skills/`; treat any legacy `.github/skills/` reference in older planning text as stale.
 2. Read `PLAN.md` completely. It defines the current product hypothesis, milestone order, acceptance gates,
-   and explicit non-goals.
+   and explicit non-goals. Read `EXPERIENCE_AND_MEDIA.md` as its 2026-09-11 scoped amendment for listening
+   atmosphere and provider-operation review; it does not advance or replace the current milestone.
 3. Read `PROJECT_STRUCTURE.md`. It defines project ownership, experiment promotion, test placement, and the
    role of Nu-native serialized entity trees.
 4. Read `ARCHITECTURE.md`. It describes the system actually implemented; update it rather than preserving an
@@ -22,9 +23,9 @@ Before changing this project:
 5. Inspect the exact current code, assets, scene files, tests, and relevant Playground experiment before
    making an implementation claim.
 
-When documents disagree, current executable behavior and tests establish what exists; `PLAN.md` establishes
-what to build next; `PROJECT_STRUCTURE.md` establishes where it belongs. Record a reconciliation instead of
-silently choosing the most convenient statement.
+When documents disagree, current executable behavior and tests establish what exists; `PLAN.md` and its
+scoped amendment establish the intended product and gates; `PROJECT_STRUCTURE.md` establishes where it
+belongs. Record a reconciliation instead of silently choosing the most convenient statement.
 
 ## Milestone discipline
 
@@ -78,6 +79,11 @@ Do not introduce YouTube downloading, server-side extraction, hidden capture, re
 or a release dependency on a policy- or licence-uncleared adapter. Owned-media and synthetic paths must remain
 usable independently of provider-specific research.
 
+Apply the operation-specific review in `EXPERIENCE_AND_MEDIA.md`. User-selected links, private playback,
+browser permissions and avoiding an SDK are not blanket clearance; equally, do not assume every independent
+browser feature is governed by an API contract it does not use. Provider detection is a capability control,
+not a bypass. Keep atmosphere hypotheses separate from claims about law, retention or willingness to pay.
+
 Keep provenance, source identity, consent/licensing assumptions, analyzer version, and failure status
 explicit at adapter boundaries. Do not allow external identifiers or model output to become unversioned game
 state.
@@ -95,3 +101,5 @@ Run the narrow project build first, then the checks required by the changed laye
 
 Update `ARCHITECTURE.md` when runtime architecture changes, `PROJECT_STRUCTURE.md` when ownership or authoring
 boundaries change, and the `PLAN.md` decision/evidence logs when evidence resolves or reverses a choice.
+Documentation-only changes must still verify references and preserve evidence limits; do not claim an
+unperformed build, human gate or legal audit.
