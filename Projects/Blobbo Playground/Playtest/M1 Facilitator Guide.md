@@ -14,7 +14,7 @@ whether unfamiliar players can discover, repeat, predict, and prefer one of the 
    `M1 Participants.csv` to reduce order and learning bias.
 
 The screen intentionally provides the only initial visual prompt: the selected control is bracketed,
-the action label appears above Blobbo, and the trajectory, target, outcome, and bounded-force telemetry
+the action label appears above Blobbo, and the trajectory, target, outcome, and bounded-acceleration telemetry
 respond to play. Do not explain the mechanic before the discovery observation.
 
 ## Run one participant

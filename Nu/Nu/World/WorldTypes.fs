@@ -2201,7 +2201,7 @@ and [<NoEquality; NoComparison>] World =
     member this.Eye2dCenter =
         this.GameState.Eye2dCenter
 
-    /// Get the size of the 2D eye, viewable for all window dimensions.
+    /// Get the base size of the 2D eye, before the configured viewing margin.
     member this.Eye2dSize =
         this.GameState.Eye2dSize
 
@@ -2209,12 +2209,12 @@ and [<NoEquality; NoComparison>] World =
     member this.Eye2dViewed =
         this.GameState.Eye2dViewed
 
-    /// Get the viewable size of the 2D eye, for any potential window dimension.
+    /// Get the maximum configured size of the 2D eye, including the viewing margin.
     member this.Eye2dViewable =
         let eyeSize = this.Eye2dSize
         eyeSize + eyeSize * 2.0f * Constants.Engine.EyeMarginMaxScalar
 
-    /// Get the bounds of the 2D eye, viewable for all window dimensions.
+    /// Get the base bounds of the 2D eye, before the configured viewing margin.
     member this.Eye2dBounds =
         let eyeCenter = this.Eye2dCenter
         let eyeSize = this.Eye2dSize
@@ -2226,7 +2226,7 @@ and [<NoEquality; NoComparison>] World =
         let eyeViewed = this.GameState.Eye2dViewed
         box2 (eyeCenter - eyeViewed * 0.5f) eyeViewed
 
-    /// Get the viewable bounds of the 2D eye, for any potential window dimension.
+    /// Get the maximum configured bounds of the 2D eye, including the viewing margin.
     member this.Eye2dBoundsViewable =
         let eyeCenter = this.Eye2dCenter
         let eyeViewable = this.Eye2dViewable

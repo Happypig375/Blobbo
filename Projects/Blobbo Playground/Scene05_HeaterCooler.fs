@@ -5,6 +5,12 @@ open Prime
 open Nu
 open BlobboPlayground
 
+module [<AutoOpen>] Scene05ThermalExtensions =
+    type Screen with
+        member this.GetHeaterEnabled world : bool = this.Get (nameof this.HeaterEnabled) world
+        member this.SetHeaterEnabled (value : bool) world = this.Set (nameof this.HeaterEnabled) value world
+        member this.HeaterEnabled = lens (nameof this.HeaterEnabled) this this.GetHeaterEnabled this.SetHeaterEnabled
+
 // this is the dispatcher that defines the behavior of the screen where gameplay takes place.
 type Scene05_HeaterCoolerDispatcher () =
     inherit ScreenDispatcherImSim ()
@@ -12,13 +18,22 @@ type Scene05_HeaterCoolerDispatcher () =
     // here we define default property values
     static member Properties =
         [define Screen.GameplayState Quit
-         define Screen.HeldEntity Address.empty]
+         define Screen.HeldEntity Address.empty
+         define Screen.HeaterEnabled true]
 
     // here we define the behavior of our gameplay
     override this.Process (_, screen, world) =
 
         if screen.GetSelected world then
             World.beginGroup "Group" [] world
+
+            if PlaygroundVisual.button "Pause" (if world.TimeAdvancing then "Pause (Space)" else "Resume (Space)")
+                (v2 0.0f 163.0f) 146.0f world || World.isKeyboardKeyPressed KeyboardKey.Space world then
+                World.setTimeAdvancing (not world.TimeAdvancing) world
+                screen.SetHeldEntity Address.empty world
+            let addWater =
+                PlaygroundVisual.button "Water" "Water (W / hold ~)" (v2 237.0f 163.0f) 146.0f world ||
+                World.isKeyboardKeyPressed KeyboardKey.W world || World.isKeyboardKeyDown KeyboardKey.Grave world
             
             // declare border
             World.doBlockBody2d "Border"
@@ -39,6 +54,7 @@ type Scene05_HeaterCoolerDispatcher () =
             World.doEntity<FluidEmitter2dDispatcher> "World fluid"
                 [Entity.Size .= v3 640f 400f 0f] world
             let fluidEmitter = world.DeclaredEntity
+            PlaygroundVisual.configureFluidAppearance fluidEmitter world
 
             // =================== Smoke Chamber ===================
             // A walled-off area in the upper-center that Blobbo cannot enter.
@@ -74,7 +90,7 @@ type Scene05_HeaterCoolerDispatcher () =
                  Entity.Size .= v3 280f 12f 0f
                  Entity.BodyType .= Static
                  Entity.Sensor .= true
-                 Entity.StaticImage .= Assets.Default.Label] world |> ignore
+                 Entity.Visible .= false] world |> ignore
             let heater = world.DeclaredEntity
 
             // =================== Rotating Blade ===================
@@ -132,14 +148,14 @@ type Scene05_HeaterCoolerDispatcher () =
                  Entity.CollideConnected .= false] world |> ignore
 
             // =================== Cooler ===================
-            // A sensor body at the top of the chamber. Converts smoke particles back to water,
-            // which then falls outside the chamber, preventing water from entering the smoke region.
+            // A sensor body at the top of the chamber converts smoke back to water.
+            // The new phase's gravity reverses its existing upward velocity.
             World.doBoxBody2d "Cooler"
                 [Entity.Position .= v3 0f 140f 0f
                  Entity.Size .= v3 280f 12f 0f
                  Entity.BodyType .= Static
                  Entity.Sensor .= true
-                 Entity.StaticImage .= Assets.Default.Label] world |> ignore
+                 Entity.Visible .= false] world |> ignore
             let cooler = world.DeclaredEntity
 
             // =================== Game Entities ===================
@@ -161,13 +177,22 @@ type Scene05_HeaterCoolerDispatcher () =
                  Entity.FacetNames .= set [nameof FeelerFacet]] world
             let blobbo = world.DeclaredEntity
 
+            let heaterBounds = (heater.GetPerimeter world).Box2
+            let intactBalloons = [balloon1; balloon2] |> List.filter (fun balloon -> (balloon.GetWaterBalloonCenter world).IsSome)
+            let contactingContainers = blobbo :: intactBalloons |> List.filter (fun container -> heaterBounds.Intersects (container.GetPerimeter world).Box2)
+            let toggleHeat =
+                PlaygroundVisual.button "Heat" (ThermalStationVisual.heatStatus (screen.GetHeaterEnabled world) contactingContainers.Length)
+                    (v2 -237.0f 163.0f) 146.0f world || World.isKeyboardKeyPressed KeyboardKey.H world
+            if world.TimeAdvancing && toggleHeat then screen.SetHeaterEnabled (not (screen.GetHeaterEnabled world)) world
+            let heatEnabled = screen.GetHeaterEnabled world
+
             // =================== Mouse Interaction ===================
             let eyeBounds = World.getEye2dBounds world
             let raw = World.getMousePosition2dWorld false world
             let mousePosition = v3 (max eyeBounds.Min.X (min eyeBounds.Max.X raw.X)) (max eyeBounds.Min.Y (min eyeBounds.Max.Y raw.Y)) 0f
-            if blobbo.GetTouched world then
+            if world.TimeAdvancing && blobbo.GetTouched world then
                 screen.SetHeldEntity blobbo.EntityAddress world
-            elif World.isMouseButtonUp MouseLeft world then
+            elif not world.TimeAdvancing || World.isMouseButtonUp MouseLeft world then
                 screen.SetHeldEntity Address.empty world
             if screen.GetHeldEntity world <> Address.empty then
                 World.doOrbBody2d "Mouse"
@@ -190,29 +215,26 @@ type Scene05_HeaterCoolerDispatcher () =
 
             // =================== Heater Mechanics ===================
             // Convert water particles that drift into the heater zone to rising smoke.
-            let heaterBounds = heater.GetBounds world
-            World.chooseFluidParticles (fun particle ->
-                if particle.FluidParticleConfig = "Water" &&
-                   heaterBounds.Contains particle.FluidParticlePosition <> ContainmentType.Disjoint then
-                    ValueSome
-                        { particle with
-                            FluidParticleConfig = "Smoke"
-                            FluidParticleVelocity = v3 (Gen.randomf - 0.5f) (Gen.randomf * 2.0f + 1.5f) 0.0f * 3.0f }
-                else ValueSome particle)
-                (fluidEmitter.GetFluidEmitterId world) world
+            if world.TimeAdvancing && heatEnabled then
+                World.chooseFluidParticles (fun particle ->
+                    if particle.FluidParticleConfig = "Water" &&
+                       heaterBounds.Contains particle.FluidParticlePosition.V2 <> ContainmentType.Disjoint then
+                        ValueSome { particle with FluidParticleConfig = "Smoke" }
+                    else ValueSome particle)
+                    (fluidEmitter.GetFluidEmitterId world) world
 
             // Fire Heat event on water containers that overlap the heater zone.
             // This causes them to convert stored water content to smoke particles.
             let eventTrace = EventTrace.debug "Heater" "Process" "" EventTrace.empty
-            for container in [blobbo; balloon1; balloon2] do
-                let containerPos = container.GetPosition world
-                let dx = abs (containerPos.X - 0f)
-                let dy = abs (containerPos.Y - (-68f))
-                if dx < 150f && dy < 40f then
+            for container in contactingContainers do
+                if world.TimeAdvancing && heatEnabled && container.GetWaterContent world > 0 then
                     World.publishPlus () container.HeatEvent eventTrace container true false world
+            // Keep the chamber's original permeable sensor; this plate is presentation only.
+            let plateBounds = box2 (v2 (heaterBounds.Min.X - 4.0f) (heaterBounds.Min.Y - 8.0f)) (v2 (heaterBounds.Size.X + 8.0f) 8.0f)
+            ThermalStationVisual.heater "Heater" plateBounds heaterBounds heatEnabled contactingContainers.Length world
 
             // Debug: spawn water with grave key (moved lower so it enters heater zone naturally)
-            if World.isKeyboardKeyDown KeyboardKey.Grave world then
+            if world.TimeAdvancing && addWater then
                let spawn = v2 0f -80f
                World.emitFluidParticles (SArray.init 32 (fun _ ->
                    let jitter = v2 (Gen.randomf * 2f - 1f) (Gen.randomf - 0.5f) * 32.0f
@@ -221,23 +243,19 @@ type Scene05_HeaterCoolerDispatcher () =
                 world
 
             // =================== Cooler Mechanics ===================
-            // Convert smoke particles that reach the top of the chamber back to water.
-            // The water falls downward outside the chamber, unable to re-enter.
-            let coolerBounds = cooler.GetBounds world
-            World.chooseFluidParticles (fun particle ->
-                if particle.FluidParticleConfig = "Smoke" &&
-                   coolerBounds.Contains particle.FluidParticlePosition <> ContainmentType.Disjoint then
-                    ValueSome
-                        { particle with
-                            FluidParticleConfig = "Water"
-                            FluidParticleVelocity = v3 (Gen.randomf - 0.5f) (Gen.randomf * -2.0f - 1.5f) 0.0f * 3.0f }
-                else ValueSome particle)
-                (fluidEmitter.GetFluidEmitterId world) world
+            // Conversion preserves velocity; ordinary water gravity then turns the particles downward.
+            let coolerBounds = (cooler.GetPerimeter world).Box2
+            ThermalStationVisual.cooler "Cooler" coolerBounds world
+            if world.TimeAdvancing then
+                World.chooseFluidParticles (fun particle ->
+                    if particle.FluidParticleConfig = "Smoke" &&
+                       coolerBounds.Contains particle.FluidParticlePosition.V2 <> ContainmentType.Disjoint then
+                        ValueSome { particle with FluidParticleConfig = "Water" }
+                    else ValueSome particle)
+                    (fluidEmitter.GetFluidEmitterId world) world
 
             // =================== Pause / Overlay / Revive ===================
             if screen.GetSelected world then
-                if World.isKeyboardKeyPressed KeyboardKey.Space world then
-                    World.setTimeAdvancing (not world.TimeAdvancing) world
                 if world.TimeAdvancing then ()
                 else
                     World.doStaticSprite "Overlay" 
@@ -246,7 +264,7 @@ type Scene05_HeaterCoolerDispatcher () =
                          Entity.Absolute .= true
                          Entity.StaticImage .= Assets.Default.White
                          Entity.Color .= color 0.5f 0.5f 0.5f 0.5f] world |> ignore
-                if World.isKeyboardKeyPressed KeyboardKey.Enter world then
+                if world.TimeAdvancing && World.isKeyboardKeyPressed KeyboardKey.Enter world then
                     World.publish () blobbo.ReviveEvent blobbo world
 
             // declare quit button

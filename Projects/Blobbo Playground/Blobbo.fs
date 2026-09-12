@@ -1,4 +1,4 @@
-﻿namespace BlobboPlayground
+namespace BlobboPlayground
 open System
 open System.Numerics
 open Box2D.NET
@@ -10,6 +10,49 @@ type PhysicsBodyTransform =
       BodyRotation : Quaternion
       BodyLinearVelocity : Vector2
       BodyAngularVelocity : Vector2 }
+
+[<RequireQualifiedAccess>]
+module BlobboBodyModel =
+
+    let CenterBodyIndex = -1
+    let ContourCount = 32
+    let CenterToContourDistance = 32.0f
+    let ContourRadius = CenterToContourDistance * sin (MathF.PI / single ContourCount)
+    let CenterRadius = ContourRadius * 1.5f
+    let MaximumWaterContent = 32
+
+    let waterScale waterContent = 1.0f + single waterContent / single MaximumWaterContent * 0.5f
+
+    let resizeForWater previous current center (contour : PhysicsBodyTransform array) =
+        let ratio = waterScale current / waterScale previous
+        contour
+        |> Array.map (fun point ->
+            { point with BodyCenter = center + (point.BodyCenter - center) * ratio })
+
+    /// The same expanded contour owns both rendering and direct pointer contact.
+    let renderedPoints (contour : PhysicsBodyTransform array) =
+        let points = contour |> Array.map _.BodyCenter
+        if points.Length < 3 then points
+        else
+            let mutable signedArea = 0.0f
+            for index in 0 .. points.Length - 1 do
+                let point = points[index]
+                let next = points[(index + 1) % points.Length]
+                signedArea <- signedArea + point.X * next.Y - next.X * point.Y
+            let points = if signedArea < 0.0f then Array.rev points else points
+            Array.init points.Length (fun index ->
+                let previous = points[index] - points[(index + points.Length - 1) % points.Length]
+                let next = points[(index + 1) % points.Length] - points[index]
+                let normal (edge : Vector2) =
+                    let length = edge.Length ()
+                    if length > 0.0001f then v2 edge.Y -edge.X / length else v2Zero
+                let outward = normal previous + normal next
+                let length = outward.Length ()
+                points[index] + if length > 0.0001f then outward * (ContourRadius / length) else v2Zero)
+
+    let canAbsorb waterContent (center : Vector2) (particle : FluidParticle) =
+        waterContent < MaximumWaterContent && particle.FluidParticleConfig = "Water" &&
+        Vector2.Distance (particle.FluidParticlePosition.V2, center) < CenterToContourDistance * 1.5f
 
 module [<AutoOpen>] BlobboExtensions =
     type Entity with
@@ -24,15 +67,15 @@ module [<AutoOpen>] BlobboExtensions =
 type BlobboDispatcher () =
     inherit Entity2dDispatcherImSim (true, false, false)
 
-    static let centerBodyIndex = -1 // internal index for body joints
-    static let centerToContourDistance = 32f
+    static let centerBodyIndex = BlobboBodyModel.CenterBodyIndex
+    static let centerToContourDistance = BlobboBodyModel.CenterToContourDistance
     static let initialBlobboCenter =
         { BodyCenter = v2Zero
           BodyRotation = Quaternion.Identity
           BodyLinearVelocity = v2Zero
           BodyAngularVelocity = v2Zero }
     static let initialBlobboContour =
-        let count = 32
+        let count = BlobboBodyModel.ContourCount
         [|for i in 0 .. count - 1 ->
             let angle = single i * MathF.TWO_PI / single count
             { BodyCenter = v2 (cos angle * centerToContourDistance) (sin angle * centerToContourDistance)
@@ -40,12 +83,9 @@ type BlobboDispatcher () =
               BodyLinearVelocity = v2Zero
               BodyAngularVelocity = v2Zero }
         |]
-    static let interContourDistance = Vector2.Distance (initialBlobboContour[0].BodyCenter, initialBlobboContour[1].BodyCenter)
-    static let contourCircleRadius = interContourDistance / 2f
-    static let centerCircleRadius = contourCircleRadius * 1.5f
-    static let absorptionRadius = centerToContourDistance * 1.5f
-    static let maxWaterContent = 32 // capacity in particle count
-    static let growthFactor = 0.5f
+    static let contourCircleRadius = BlobboBodyModel.ContourRadius
+    static let centerCircleRadius = BlobboBodyModel.CenterRadius
+    static let maxWaterContent = BlobboBodyModel.MaximumWaterContent
     static let blobboFullCollisionCategories = "10000000000000000" // bit 16, outside fluid default mask (0xFFFF)
 
     static member Facets =
@@ -56,11 +96,23 @@ type BlobboDispatcher () =
          define Entity.AwakeTimeStamp 0
          nonPersistent Entity.PhysicsMotion ManualMotion]
 
+    override _.Register (blobbo, world) =
+        World.monitor (fun event world ->
+            let previous = event.Data.Previous :?> int
+            let current = event.Data.Value :?> int
+            let center = blobbo.GetBlobboCenter world
+            let contour =
+                blobbo.GetBlobboContour world
+                |> BlobboBodyModel.resizeForWater previous current center.BodyCenter
+            blobbo.SetBlobboContour contour world
+            if World.getBodyExists { BodySource = blobbo; BodyIndex = centerBodyIndex } world then blobbo.PropagatePhysics world
+            Cascade) blobbo.WaterContent.ChangeEvent blobbo world
+
     override _.RegisterPhysics (blobbo, world) =
         let waterContent = blobbo.GetWaterContent world
         let isFull = waterContent >= maxWaterContent
         let collisionCategories = if isFull then blobboFullCollisionCategories else "1"
-        let expansionScale = 1.0f + (single waterContent / single maxWaterContent) * growthFactor
+        let expansionScale = BlobboBodyModel.waterScale waterContent
         let registerPhysicsTransform radius i physicsTransform =
             let bodyId = { BodySource = blobbo; BodyIndex = i }
             let bodyProperties =
@@ -186,30 +238,18 @@ type BlobboDispatcher () =
                 let mutable absorbed = 0
                 let remainingCapacity = maxWaterContent - waterContent
                 World.chooseFluidParticles (fun particle ->
-                    if absorbed < remainingCapacity &&
-                       Vector2.Distance (particle.FluidParticlePosition.V2, center.BodyCenter) < absorptionRadius then
+                    if absorbed < remainingCapacity && BlobboBodyModel.canAbsorb waterContent center.BodyCenter particle then
                         absorbed <- absorbed + 1
                         ValueNone
                     else ValueSome particle)
                     (emitter.GetFluidEmitterId world) world
                 if absorbed > 0 then
                     let waterContent' = min maxWaterContent (waterContent + absorbed)
-                    let oldScale = 1.0f + (single waterContent / single maxWaterContent) * growthFactor
-                    let newScale = 1.0f + (single waterContent' / single maxWaterContent) * growthFactor
-                    // Expand contour bodies outward from center so physics matches fullness.
-                    let scaleRatio = newScale / oldScale
-                    for i in 0 .. contour.Length - 1 do
-                        let t = contour[i]
-                        let expanded = center.BodyCenter + (t.BodyCenter - center.BodyCenter) * scaleRatio
-                        contour[i] <- { t with BodyCenter = expanded }
-                        World.setBodyCenter expanded.V3 { BodySource = blobbo; BodyIndex = i } world
-                    blobbo.SetBlobboContour contour world
                     blobbo.SetWaterContent waterContent' world
-                    blobbo.PropagatePhysics world
             | None -> ()
 
         let perimeter =
-            (box2 (center.BodyCenter - v2Dup centerCircleRadius) (v2Dup (centerCircleRadius * 2f)), contour)
+            (box2 (center.BodyCenter - v2Dup centerCircleRadius) (v2Dup (centerCircleRadius * 2f)), blobbo.GetBlobboContour world)
             ||> Array.fold (fun perimeter t -> box2 (t.BodyCenter - v2Dup contourCircleRadius) (v2Dup (contourCircleRadius * 2f)) |> perimeter.Combine)
         blobbo.SetPerimeter perimeter.Box3 world
 
@@ -220,33 +260,7 @@ type BlobboDispatcher () =
             let size =
                 let s = (blobbo.GetSize world).V2
                 v2 (max 0.0001f s.X) (max 0.0001f s.Y)
-            // Compute base polygon from body centers in world space (already at fullness scale from physics).
-            let worldPoints = contour |> Array.map (fun t -> t.BodyCenter)
-            // Force CCW winding so edge normals expand outward correctly.
-            let worldPoints =
-                let mutable signedArea2x = 0.0f
-                for i in 0 .. worldPoints.Length - 1 do
-                    let p = worldPoints[i]
-                    let q = worldPoints[(i + 1) % worldPoints.Length]
-                    signedArea2x <- signedArea2x + (p.X * q.Y - q.X * p.Y)
-                if signedArea2x < 0.0f then Array.rev worldPoints else worldPoints
-            // Expand polygon outward by contourCircleRadius using edge normals (handles concave contours).
-            let n = worldPoints.Length
-            let worldPoints =
-                Array.init n (fun i ->
-                    let iPrev = (i - 1 + n) % n
-                    let iNext = (i + 1) % n
-                    let dPrev = worldPoints[i] - worldPoints[iPrev]
-                    let dNext = worldPoints[iNext] - worldPoints[i]
-                    let lenPrev = dPrev.Magnitude
-                    let lenNext = dNext.Magnitude
-                    // Outward normals for CCW polygon: right normal of edge direction.
-                    let nPrev = if lenPrev > 0.0001f then v2 (dPrev.Y / lenPrev) (-dPrev.X / lenPrev) else v2Zero
-                    let nNext = if lenNext > 0.0001f then v2 (dNext.Y / lenNext) (-dNext.X / lenNext) else v2Zero
-                    let vn = nPrev + nNext
-                    let vnLen = vn.Magnitude
-                    let outward = if vnLen > 0.0001f then vn * (contourCircleRadius / vnLen) else v2Zero
-                    worldPoints[i] + outward)
+            let worldPoints = BlobboBodyModel.renderedPoints contour
             // Normalize to entity-local space for tessellation.
             let points = worldPoints |> Array.map (fun p -> (p - position.V2) / size)
             let commands = Array.zeroCreate<ContourCommand> (points.Length + 1)

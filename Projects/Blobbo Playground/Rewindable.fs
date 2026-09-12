@@ -33,6 +33,14 @@ module [<AutoOpen>] RewindableExtensions =
 type RewindableFacet () =
     inherit Facet (false, false, false)
 
+    static let synchronizeBody (entity : Entity) world =
+        let bodyId = entity.GetBodyId world
+        if World.getBodyExists bodyId world then
+            World.setBodyCenter (entity.GetPerimeterCenter world) bodyId world
+            World.setBodyRotation (entity.GetRotation world) bodyId world
+            World.setBodyLinearVelocity (entity.GetLinearVelocity world) bodyId world
+            World.setBodyAngularVelocity (entity.GetAngularVelocity world) bodyId world
+
     static member Facets =
         [typeof<RigidBodyFacet>]
 
@@ -40,10 +48,18 @@ type RewindableFacet () =
         [define Entity.RewindPreview None
          define Entity.RewindHistory []
          define Entity.TimeSinceLastHistoryEntry GameTime.zero
-         computed Entity.BodyId (fun (entity : Entity) _ -> { BodySource = entity; BodyIndex = 0 }) None // force body transform events to be published
          nonPersistent Entity.RewindHistoryActiveInternal true]
 
     override _.Register (entity, world) =
+        // Extrinsic facet attachment preserves existing properties, so adopt manual motion explicitly.
+        let physicsMotion = entity.GetPhysicsMotion world
+        entity.SetPhysicsMotion ManualMotion world
+        World.sense (fun event world ->
+            if Set.contains (nameof RewindableFacet) (event.Data.Previous :?> string Set) &&
+               not (Set.contains (nameof RewindableFacet) (event.Data.Value :?> string Set)) then
+                entity.SetPhysicsMotion physicsMotion world
+            Cascade) entity.FacetNames.ChangeEvent entity (nameof RewindableFacet) world
+
         // sense rewind event
         let (~-) = GameTime.unary ((~-) >> UpdateTime) ((~-) >> TickTime)
         World.sense (fun event world ->
@@ -85,6 +101,7 @@ type RewindableFacet () =
                 for KeyValue (property, value) in rewindProperties do
                     let prop = entity.TryGetProperty property world |> Option.get
                     entity.SetProperty property { prop with PropertyValue = System.ComponentModel.TypeDescriptor.GetConverter(prop.PropertyType).ConvertFrom value } world
+                synchronizeBody entity world
                 entity.SetRewindHistoryActiveInternal true world
             Cascade) entity.RewindEvent entity (nameof RewindableFacet) world
 
@@ -158,6 +175,10 @@ type RewindableFacet () =
                 if entity.GetRewindHistoryActiveInternal world then
                     entity.RewindHistory.Map (List.cons { PropertyName = changeProperty.Name; PreviousValue = valueToSymbol event.Data.Previous; TimePassed = entity.GetTimeSinceLastHistoryEntry world }) world
                     entity.SetTimeSinceLastHistoryEntry GameTime.zero world
+                    match changeProperty.Name with
+                    | nameof Entity.Position | nameof Entity.Rotation | nameof Entity.LinearVelocity | nameof Entity.AngularVelocity ->
+                        synchronizeBody entity world
+                    | _ -> ()
                 Cascade) changeProperty.ChangeEvent entity (nameof RewindableFacet) world
         senseChangeEvent entity.LinearVelocity
         senseChangeEvent entity.AngularVelocity
@@ -181,20 +202,21 @@ type RewindableFacet () =
             Cascade) entity.BodySeparationExplicitEvent entity (nameof RewindableFacet) world
 
         // sense change events - body transform
-        // NOTE: assumes BodyTransformEvent is fired at all, see the event firing criteria in WorldModule2.fs
+        // ManualMotion receives the normal rigid body's transform and owns live entity/render synchronization.
         World.sense (fun event world ->
             let entity = event.Subscriber
-            entity.RewindHistory.Map (fun rewindHistory ->
-                [{ PropertyName = nameof Entity.Position; PreviousValue = valueToSymbol <| entity.GetPosition world; TimePassed = GameTime.zero }
-                 { PropertyName = nameof Entity.Rotation; PreviousValue = valueToSymbol <| entity.GetRotation world; TimePassed = GameTime.zero }
-                 { PropertyName = nameof Entity.LinearVelocity; PreviousValue = valueToSymbol <| entity.GetLinearVelocity world; TimePassed = GameTime.zero }
-                 { PropertyName = nameof Entity.AngularVelocity; PreviousValue = valueToSymbol <| entity.GetAngularVelocity world; TimePassed = entity.GetTimeSinceLastHistoryEntry world }
-                 yield! rewindHistory]) world
-            entity.SetTimeSinceLastHistoryEntry GameTime.zero world
+            if entity.GetRewindHistoryActiveInternal world && (entity.GetRewindPreview world).IsNone then
+                entity.RewindHistory.Map (fun rewindHistory ->
+                    [{ PropertyName = nameof Entity.Position; PreviousValue = valueToSymbol <| entity.GetPosition world; TimePassed = GameTime.zero }
+                     { PropertyName = nameof Entity.Rotation; PreviousValue = valueToSymbol <| entity.GetRotation world; TimePassed = GameTime.zero }
+                     { PropertyName = nameof Entity.LinearVelocity; PreviousValue = valueToSymbol <| entity.GetLinearVelocity world; TimePassed = GameTime.zero }
+                     { PropertyName = nameof Entity.AngularVelocity; PreviousValue = valueToSymbol <| entity.GetAngularVelocity world; TimePassed = entity.GetTimeSinceLastHistoryEntry world }
+                     yield! rewindHistory]) world
+                entity.SetTimeSinceLastHistoryEntry GameTime.zero world
             entity.Physics event.Data.BodyCenter event.Data.BodyRotation event.Data.BodyLinearVelocity event.Data.BodyAngularVelocity world
             Cascade) entity.BodyTransformEvent entity (nameof RewindableFacet) world
             
-        // stop physics and make invisible during rewind preview
+        // Stop the existing body during preview; historical renders never register separate physics bodies.
         World.sense (fun event world ->
             let entity : Entity = event.Subscriber
             let notRewinding = event.Data.Value :?> GameTime option |> Option.isNone

@@ -1,10 +1,10 @@
 # Blobbo and Chrono — music-shaped physics journey implementation plan
 
 **Status:** implementation plan; M0 and M1 code-ready gates completed with evidence below; M1 human gate pending
-**Current milestone:** M1 — Blobbo body and control comparison (code-ready complete; human gate pending)
+**Current milestone:** M1 — body/control comparison and integrated prototype playtest (human gate pending)
 **Plan authority:** this file defines the current product hypothesis, scope, order of implementation, and acceptance gates for `Projects/Blobbo and Chrono/`  
 **Architecture authority:** `ARCHITECTURE.md` describes the system that is actually implemented; update it when implementation changes  
-**Last reconciled:** 2026-08-31
+**Last reconciled:** 2026-09-12
 **Base branch:** `blobbo`
 
 ---
@@ -15,7 +15,7 @@ This plan is written so an implementation agent can work without reconstructing 
 
 Before changing code:
 
-1. Read the repository-root `AGENTS.md`, `Standard.md`, and `.github/skills/nu-quickstart/SKILL.md`.
+1. Read the repository-root `AGENTS.md`, `Standard.md`, and `.agents/skills/nu-quickstart/SKILL.md`.
 2. Read this file completely.
 3. Read `ARCHITECTURE.md` and the files named under **Existing implementation**.
 4. Work on the **current milestone only**. Do not start a later milestone because it appears easy or related.
@@ -735,6 +735,25 @@ and pass criteria before results are collected.
 
 Do not mark the milestone fully complete until the human gate is recorded.
 
+### 2026-09-12 scope amendment — integrated prototype playtest
+
+The project owner requests that the existing behavioral prototypes also be available together so outsiders
+can report interactions between mechanics. Preserve the isolated M1 comparison and Scenes 01–05, and make
+them reachable from one accessible playtest. Combine relevant mechanics in interaction scenarios, such as
+M1 gestures manipulating the Blobbo that meets water, balloons, machine responses, and props. Room switching
+is welcome; not every prototype must occupy one physical room. Include the existing local prop rewind,
+math-body, eye, and trail experiments with clear controls. This permits composing existing experiments now;
+it does not promote them into production or advance the media, generation, or Chrono milestones.
+
+Acceptance evidence must cover dragging before contact, during movement/holding, and after release;
+collision and deformation; combined water/machine responses; rendering after resize; bounded histories and
+particles; pause, reset, scene switching, and clean exit. Publish one self-contained participant package
+with descriptive navigation, instructions, and a feedback template. Local prop rewind must be labelled as
+such: it does not restore Blobbo's manual contour bodies, absorbed water, or the whole room.
+
+Keep integrated-playtest feedback separate from controlled M1 preference data. Human gates remain pending
+until unfamiliar testers actually run the protocol; agent interaction records implementation evidence.
+
 ---
 
 ## M2 — Chrono recovery without media
@@ -1247,9 +1266,48 @@ Do not resolve these by preference alone; attach evidence.
 
 ---
 
+### 2026-09-12 — final pinned-upstream and participant-build validation
+
+- **Revisions:** `upstream/master` / `MERGE_HEAD` at `3c2e2a3a0a7d7dff71162d6ff1200ea47e4b1a99`; `origin/blobbo`
+  remains `33fb2dd796`. The late upstream swapchain-limit repair treats Vulkan `maxImageCount = 0` as
+  unbounded and is distinct from the local empty-texture lifetime repair.
+- **Automated results:** 13 selected Nu tests passed; a fresh Playground run passed 34 tests with 0
+  failures/skips and normal native cleanup (31 pure, 3 integration); the M1 verifier passed 16 / 16 with
+  trace `5013E3E41D876A49`. Production built cleanly, and the Playground self-contained Release publish
+  completed with 196 physical assets.
+  Logs are under `C:/Users/hadri/AppData/Local/Temp/blobbo-integration-20260912/`.
+- **Project interaction scope:** all 9 body/control combinations passed live gestures on the fresh 29-test
+  build; invalid starts, playfield exit, and mid-gesture pause were exercised. Repeat input uses a fresh
+  body anchor and bounds/contact cancellation. Fresh candidate GUI checks passed Scene01 pause/drag,
+  Scene02 cyan historical target and preview flow, Scene04 inset eyes/trails, Scene05 thermal pause,
+  Combined water/heat/steam/fan/rewind, and Repeat completion/cancellation. Scene03's final
+  `3x + 4x + 6 → 6 + 7x` remained fully visible above the footer and stable in later frames;
+  extracted-package verification passed, and both fresh-extraction launchers completed their GUI checks.
+- **Recorded matrix evidence:** `final-m1-matrix.mp4` is H.264 1280×720, 180.000 seconds, 5,060 frames,
+  13,968,680 bytes, covering the 9 combinations on the 29-test build before the later Repeat, Scene01,
+  and Scene03 updates. Its nominal 30 fps is not treated as a measured stable rate.
+- **Window issue:** actual maximize/fullscreen produced stale or duplicated rendering. Debug PID 10632 was
+  force-stopped after close was ignored, so that run is not clean-exit evidence and the root cause remains
+  unestablished. The fixed-size path remained stable; minimize/restore recreated the surface correctly.
+- **Review package:** `Blobbo-Playtest-20260912-Windows-x64-review-candidate.zip` is 90,178,719 bytes with
+  SHA-256 `4FD80E7F37D55FAC1807F599022AF37AC5A818ADDF236DB1EC539B1C309E68AD`. Its extracted executable
+  hashes to `88AB977D262A808E1F6114CA818C4C7770A0BC38FD8DD5CA192CD14FB42FC8AB`, matching the published
+  binary. The extracted package contains 196 physical assets with 0 missing, 0 mismatches, no junctions,
+  and no `Log.txt`, `imgui.ini`, or `ShaderCache` entries. Extracted `--verify-m1` passes 16 / 16 with
+  trace `5013E3E41D876A49`; launchers from a fresh ZIP extraction passed. The M1 launcher created the
+  expected 640×360 client (PID 37144), and Combined created the expected 1280×720 client (PID 45600).
+  Menu/Exit returned command exit 0; both runtimes had stderr 0 and normal Vulkan surface destruction.
+- **Human gates:** Nu source human review is unrecorded and remains required before opening an upstream PR;
+  ordinary fork commit/push is not blocked by that upstream gate. Separately,
+  0 / 5 unfamiliar testers have run the M1 protocol. Agent validation satisfies neither gate, so M1 remains
+  pending and no body/control selection is promoted. Remaining technical limitations are fixed-size
+  desktop validation only: maximize/fullscreen stale rendering remains unresolved, and mobile/touch,
+  DPI, multi-monitor, and other-GPU paths were not tested.
+
 ## 20. Next implementation task
 
-M1 is code-ready. Run its human gate with at least five unfamiliar testers and record discovery,
-voluntary repetition, directional/strength prediction after three attempts, and control preference.
-Do not begin M2 or fold media, generation, Chrono recovery, enemies, story, or production art into the
-control/body study until that evidence is recorded.
+Complete and validate the integrated prototype playtest under the 2026-09-12 M1 scope amendment, then
+collect outsider feedback on combined mechanics alongside the controlled M1 human gate. Record discovery,
+voluntary repetition, directional/strength prediction after three attempts, control preference, and the
+specific mechanic combinations that help or interfere. Do not begin M2, media, generation, enemies, story,
+or production art until the applicable evidence is recorded.

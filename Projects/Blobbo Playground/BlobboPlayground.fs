@@ -1,4 +1,4 @@
-﻿namespace BlobboPlayground
+namespace BlobboPlayground
 open System
 open System.Numerics
 open Prime
@@ -30,7 +30,7 @@ type BlobboPlaygroundDispatcher () =
 
     // here we define default property values
     static member Properties =
-        [define Game.GameState (if M1Launch.Direct then Scene06_M1ControlStudy else Splash)]
+        [define Game.GameState (if M1Launch.Direct || M1Launch.Combined then Scene06_M1ControlStudy else Splash)]
 
     // here we define the game's top-level behavior
     override this.Process (game, world) =
@@ -45,14 +45,37 @@ type BlobboPlaygroundDispatcher () =
         let behavior = Dissolve (Constants.Dissolve.Default, None)
         World.beginScreen Simulants.Title.Name (game.GetGameState world = Title) behavior [] world |> ignore
         World.beginGroup "Gui" [] world
-        World.beginPanel "Panel" [Entity.Size .= (World.getDisplayVirtualResolution ()).V3; Entity.Layout .= Grid (v2i 8 8, Some FlowRightward, true)] world
-        if World.doButton "Scene01_BlobboThrow" [Entity.Text .= "01"] world then game.SetGameState Scene01_BlobboThrow world
-        if World.doButton "Scene02_BoxRewind" [Entity.Text .= "02"] world then game.SetGameState Scene02_BoxRewind world
-        if World.doButton "Scene03_MathSimplify" [Entity.Text .= "03"] world then game.SetGameState Scene03_MathSimplify world
-        if World.doButton "Scene04_SquareRace" [Entity.Text .= "04"] world then game.SetGameState Scene04_SquareRace world
-        if World.doButton "Scene05_HeaterCooler" [Entity.Text .= "05"] world then game.SetGameState Scene05_HeaterCooler world
-        if World.doButton "Scene06_M1ControlStudy" [Entity.Text .= "M1"] world then game.SetGameState Scene06_M1ControlStudy world
-        if World.doButton "Exit" [Entity.Text .= "Exit"] world && world.Unaccompanied then World.exit world
+        World.beginPanel "Panel"
+            [Entity.Size .= (World.getDisplayVirtualResolution ()).V3
+             Entity.Layout .= Flow (FlowDownward, FlowUnlimited)
+             Entity.LayoutMargin .= v2 30.0f 6.0f] world
+        World.doText "MenuTitle"
+            [Entity.Size .= v3 580.0f 32.0f 0.0f
+             Entity.Text .= "BLOBBO PLAYGROUND - CHOOSE A ROOM"
+             Entity.FontSizing .= Some 14.0f] world
+        let button name label =
+            World.doButton name
+                [Entity.Size .= v3 580.0f 32.0f 0.0f
+                 Entity.Text .= label
+                 Entity.FontSizing .= Some 11.0f] world
+        let select state =
+            World.setTimeAdvancing true world
+            World.setEye2dSize (World.getDisplayVirtualResolution ()).V2 world
+            game.SetGameState state world
+        if button "CombinedRoom" "Combined: water, heat and machines + M1 controls" then
+            M1Launch.Direct <- false
+            M1Launch.Combined <- true
+            select Scene06_M1ControlStudy
+        if button "M1Focused" "M1 focused protocol (Toy / Target)" then
+            M1Launch.Direct <- true
+            M1Launch.Combined <- false
+            select Scene06_M1ControlStudy
+        if button "Scene01_BlobboThrow" "01 — Blobbo throw + water balloons" then select Scene01_BlobboThrow
+        if button "Scene02_BoxRewind" "02 — Box rewind" then select Scene02_BoxRewind
+        if button "Scene03_MathSimplify" "03 — Math collision simplifier" then select Scene03_MathSimplify
+        if button "Scene04_SquareRace" "04 — Velocity eyes and trails" then select Scene04_SquareRace
+        if button "Scene05_HeaterCooler" "05 — Heater / cooler / fan" then select Scene05_HeaterCooler
+        if button "Exit" "Exit" && world.Unaccompanied then World.exit world
         World.endPanel world
         World.endGroup world
         World.endScreen world
@@ -62,7 +85,9 @@ type BlobboPlaygroundDispatcher () =
         let results = World.beginScreen<Scene01_BlobboThrowDispatcher> Simulants.Scene01_BlobboThrow.Name (game.GetGameState world = Scene01_BlobboThrow) behavior [] world
         if FQueue.contains Select results then Simulants.Scene01_BlobboThrow.SetGameplayState Playing world
         if FQueue.contains Deselecting results then Simulants.Scene01_BlobboThrow.SetGameplayState Quit world
-        if Simulants.Scene01_BlobboThrow.GetSelected world && Simulants.Scene01_BlobboThrow.GetGameplayState world = Quit then game.SetGameState Title world
+        if Simulants.Scene01_BlobboThrow.GetSelected world && Simulants.Scene01_BlobboThrow.GetGameplayState world = Quit then
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // declare scene 02
@@ -70,7 +95,9 @@ type BlobboPlaygroundDispatcher () =
         let results = World.beginScreen<Scene02_BoxRewindDispatcher> Simulants.Scene02_BoxRewind.Name (game.GetGameState world = Scene02_BoxRewind) behavior [] world
         if FQueue.contains Select results then Simulants.Scene02_BoxRewind.SetGameplayState Playing world
         if FQueue.contains Deselecting results then Simulants.Scene02_BoxRewind.SetGameplayState Quit world
-        if Simulants.Scene02_BoxRewind.GetSelected world && Simulants.Scene02_BoxRewind.GetGameplayState world = Quit then game.SetGameState Title world
+        if Simulants.Scene02_BoxRewind.GetSelected world && Simulants.Scene02_BoxRewind.GetGameplayState world = Quit then
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // declare scene 03
@@ -78,7 +105,9 @@ type BlobboPlaygroundDispatcher () =
         let results = World.beginScreen<Scene03_MathSimplifyDispatcher> Simulants.Scene03_MathSimplify.Name (game.GetGameState world = Scene03_MathSimplify) behavior [] world
         if FQueue.contains Select results then Simulants.Scene03_MathSimplify.SetGameplayState Playing world
         if FQueue.contains Deselecting results then Simulants.Scene03_MathSimplify.SetGameplayState Quit world
-        if Simulants.Scene03_MathSimplify.GetSelected world && Simulants.Scene03_MathSimplify.GetGameplayState world = Quit then game.SetGameState Title world
+        if Simulants.Scene03_MathSimplify.GetSelected world && Simulants.Scene03_MathSimplify.GetGameplayState world = Quit then
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // declare scene 04
@@ -86,7 +115,9 @@ type BlobboPlaygroundDispatcher () =
         let results = World.beginScreen<Scene04_SquareRaceDispatcher> Simulants.Scene04_SquareRace.Name (game.GetGameState world = Scene04_SquareRace) behavior [] world
         if FQueue.contains Select results then Simulants.Scene04_SquareRace.SetGameplayState Playing world
         if FQueue.contains Deselecting results then Simulants.Scene04_SquareRace.SetGameplayState Quit world
-        if Simulants.Scene04_SquareRace.GetSelected world && Simulants.Scene04_SquareRace.GetGameplayState world = Quit then game.SetGameState Title world
+        if Simulants.Scene04_SquareRace.GetSelected world && Simulants.Scene04_SquareRace.GetGameplayState world = Quit then
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // declare scene 05
@@ -94,18 +125,23 @@ type BlobboPlaygroundDispatcher () =
         let results = World.beginScreen<Scene05_HeaterCoolerDispatcher> Simulants.Scene05_HeaterCooler.Name (game.GetGameState world = Scene05_HeaterCooler) behavior [] world
         if FQueue.contains Select results then Simulants.Scene05_HeaterCooler.SetGameplayState Playing world
         if FQueue.contains Deselecting results then Simulants.Scene05_HeaterCooler.SetGameplayState Quit world
-        if Simulants.Scene05_HeaterCooler.GetSelected world && Simulants.Scene05_HeaterCooler.GetGameplayState world = Quit then game.SetGameState Title world
+        if Simulants.Scene05_HeaterCooler.GetSelected world && Simulants.Scene05_HeaterCooler.GetGameplayState world = Quit then
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // declare M1 body and control study
         let behavior = Dissolve (Constants.Dissolve.Default, None)
         let results = World.beginScreen<Scene06_M1ControlStudyDispatcher> Simulants.Scene06_M1ControlStudy.Name (game.GetGameState world = Scene06_M1ControlStudy) behavior [] world
-        if FQueue.contains Select results then Simulants.Scene06_M1ControlStudy.SetGameplayState Playing world
+        if FQueue.contains Select results then
+            let screen = Simulants.Scene06_M1ControlStudy
+            screen.SetGameplayState Playing world
+            screen.SetM1SceneState (M1SceneState.enter M1Launch.Combined (screen.GetM1SceneState world)) world
         if FQueue.contains Deselecting results then Simulants.Scene06_M1ControlStudy.SetGameplayState Quit world
         if Simulants.Scene06_M1ControlStudy.GetSelected world &&
            Simulants.Scene06_M1ControlStudy.GetGameplayState world = Quit then
-            if M1Launch.Direct && world.Unaccompanied then World.exit world
-            else game.SetGameState Title world
+            World.setTimeAdvancing true world
+            game.SetGameState Title world
         World.endScreen world
 
         // handle Alt+F4 when not in editor

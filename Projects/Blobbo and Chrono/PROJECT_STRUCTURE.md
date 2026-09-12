@@ -2,7 +2,7 @@
 
 **Status:** implementation constraint; read together with `PLAN.md`  
 **Applies to:** `Projects/Blobbo Playground/`, `Projects/Blobbo and Chrono/`, and any future Blobbo-specific test or tooling projects  
-**Last reconciled:** 2026-08-30
+**Last reconciled:** 2026-09-12
 
 This document defines where work belongs, how an experiment becomes production code, and how Nu-native serialized entity trees such as `.nugroup` fit the deterministic media-shaped world architecture.
 
@@ -12,7 +12,7 @@ This document defines where work belongs, how an experiment becomes production c
 
 ## `Projects/Blobbo Playground/` — executable gameplay laboratory
 
-`Blobbo Playground` is a runnable experiment harness for **isolated gameplay elements and comparisons**. It is not the actual game, a content branch of the game, or the authoritative home of product architecture.
+`Blobbo Playground` is a runnable experiment harness for **isolated comparisons and combined interaction experiments**. It is not the actual game, a content branch of the game, or the authoritative home of product architecture.
 
 Use it for questions such as:
 
@@ -39,6 +39,13 @@ hypothesis
 Playground code may be deliberately temporary. It may use debug UI, placeholder assets, exaggerated parameters, and side-by-side variants. It does not need save compatibility, campaign integration, shipping menus, stable public APIs, or final presentation.
 
 However, experiments must still be inspectable and bounded. A disposable prototype is not permission for unbounded histories, hidden global state, irreproducible randomness, or conclusions unsupported by evidence.
+
+Under the project owner's 2026-09-12 request, make the existing mechanics available in one accessible
+playtest, with room switching and purposeful combinations that expose interactions between dragging, body
+deformation, water, machines, props, and presentation. Do not force every prototype into one physical room.
+Retain the isolated baselines and label combined experiments separately. An integrated-playtest observation
+can identify interference or a useful interaction; it does not by itself select a body/control candidate
+or prove whole-room rewind. The participant package should make both kinds of experiment reachable.
 
 ### Playground dependency rule
 

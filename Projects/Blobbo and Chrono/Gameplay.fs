@@ -43,8 +43,24 @@ type GameplayDispatcher () =
         match CompositionRoot.Current with
         | Some root ->
             let snapshot = root.Simulation.Snapshot
-            let browser = root.LatestBrowserEvent |> Option.map string |> Option.defaultValue "none"
-            World.doButton "AudioStatus" [Entity.Position .= v3 -220.0f 150.0f 0.0f; Entity.Text .= sprintf "Audio %d Obstacles %d Browser %s" snapshot.SourceSampleClock snapshot.Obstacles.Length browser] world |> ignore
+            let browser =
+                match root.LatestBrowserEvent with
+                | Some (Navigate _) -> "navigate"
+                | Some Play -> "play"
+                | Some Pause -> "pause"
+                | Some (Seek _) -> "seek"
+                | Some (AudioFormat _) -> "format received"
+                | Some End -> "ended"
+                | Some (Overlay _) -> "overlay"
+                | None -> "none"
+            World.doText "AudioStatus"
+                [Entity.Position .= v3 0.0f 150.0f 0.0f
+                 Entity.Size .= v3 620.0f 24.0f 0.0f
+                 Entity.Absolute .= true
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.FontSizing .= Some 8.0f
+                 Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)
+                 Entity.Text @= sprintf "Audio sample %d | Obstacles %d | Browser %s" snapshot.SourceSampleClock snapshot.Obstacles.Length browser] world
         | None -> ()
 
         // declare quit button

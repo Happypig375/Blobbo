@@ -20,6 +20,8 @@ type M1ControlMode =
 type M1Room =
     | EmptyToyRoom
     | GenerousTargetRoom
+    /// A bounded cross-system room for participant interaction feedback.
+    | CombinedInteractionsRoom
 
 /// Input provenance stays explicit so touch can use the same control path as mouse and replay.
 type M1PointerDevice =
@@ -39,18 +41,30 @@ type M1PointerSample =
       Phase : M1PointerPhase
       Device : M1PointerDevice }
 
+type M1ReplayCancellation =
+    | ReplayOutsidePlayfield
+    | ReplayMissingContact
+
+/// Input replay owns only its translated samples and progress, not a snapshot of the physical world.
+type M1InputReplay =
+    | NoInputReplay
+    | PendingInputReplay
+    | PlayingInputReplay of Samples : M1PointerSample array * Index : int
+    | FinishedInputReplay
+    | CancelledInputReplay of M1ReplayCancellation
+
 type M1ControlConfiguration =
     { FixedDeltaSeconds : single
-      GrabRadius : single
+      PointerVelocityWindowSeconds : single
       GrabSpring : single
       GrabDamping : single
       PullHoldSpring : single
       PullHoldDamping : single
       GrabReleaseGain : single
-      PullImpulsePerPixel : single
+      PullSpeedPerPixel : single
       SwipeImpulseGain : single
-      MaximumForce : single
-      MaximumImpulse : single
+      MaximumAcceleration : single
+      MaximumReleaseSpeed : single
       MaximumSpeed : single }
 
 [<RequireQualifiedAccess>]
@@ -58,24 +72,23 @@ module M1ControlConfiguration =
 
     let defaultConfiguration =
         { FixedDeltaSeconds = 1.0f / 60.0f
-          GrabRadius = 72.0f
-          GrabSpring = 34.0f
-          GrabDamping = 7.5f
-          PullHoldSpring = 8.0f
-          PullHoldDamping = 4.0f
+          PointerVelocityWindowSeconds = 0.08f
+          GrabSpring = 70.0f
+          GrabDamping = 12.0f
+          PullHoldSpring = 65.0f
+          PullHoldDamping = 14.0f
           GrabReleaseGain = 0.16f
-          PullImpulsePerPixel = 2.8f
+          PullSpeedPerPixel = 2.8f
           SwipeImpulseGain = 0.2f
-          MaximumForce = 2400.0f
-          MaximumImpulse = 420.0f
+          MaximumAcceleration = 2400.0f
+          MaximumReleaseSpeed = 420.0f
           MaximumSpeed = 620.0f }
 
 type M1ActiveControl =
     { PressPosition : Vector2
       BodyPositionAtPress : Vector2
       GrabOffset : Vector2
-      PreviousPosition : Vector2
-      PreviousTick : int
+      PointerSamplesRev : M1PointerSample list
       PointerVelocity : Vector2 }
 
 type M1ControlState =
@@ -84,8 +97,8 @@ type M1ControlState =
 
 type M1ControlOutput =
     { State : M1ControlState
-      Force : Vector2
-      Impulse : Vector2
+      Acceleration : Vector2
+      VelocityChange : Vector2
       Started : bool
       Released : bool }
 
@@ -101,8 +114,8 @@ module M1Control =
     let clampSpeed (configuration : M1ControlConfiguration) (velocity : Vector2) =
         clampMagnitude configuration.MaximumSpeed velocity
 
-    /// Calculate the bounded release impulse used by both control execution and live previews.
-    let releaseImpulse
+    /// World units per second, shared by release execution and the live trajectory preview.
+    let releaseVelocityChange
         (configuration : M1ControlConfiguration)
         (mode : M1ControlMode)
         (pressPosition : Vector2)
@@ -110,14 +123,40 @@ module M1Control =
         (pointerVelocity : Vector2) =
         (match mode with
          | GrabThrow -> pointerVelocity * configuration.GrabReleaseGain
-         | PullSling -> (pressPosition - pointerPosition) * configuration.PullImpulsePerPixel
+         | PullSling -> (pressPosition - pointerPosition) * configuration.PullSpeedPerPixel
          | SwipeSmack -> pointerVelocity * configuration.SwipeImpulseGain)
-        |> clampMagnitude configuration.MaximumImpulse
+        |> clampMagnitude configuration.MaximumReleaseSpeed
 
-    let private pointerVelocity (configuration : M1ControlConfiguration) (sample : M1PointerSample) (active : M1ActiveControl) =
-        let elapsedTicks = max 1 (sample.Tick - active.PreviousTick)
-        let elapsed = single elapsedTicks * configuration.FixedDeltaSeconds
-        (sample.Position - active.PreviousPosition) / elapsed
+    let releaseVelocity configuration velocityChange bodyVelocity =
+        clampSpeed configuration (bodyVelocity + velocityChange)
+
+    let private updatePointer (configuration : M1ControlConfiguration) (sample : M1PointerSample) (active : M1ActiveControl) =
+        let elapsedSince previous = single (sample.Tick - previous.Tick) * configuration.FixedDeltaSeconds
+        let window = configuration.PointerVelocityWindowSeconds
+        // Keep the window plus one older sample so its boundary can be interpolated across sparse input.
+        let rec trim = function
+            | newer :: older :: rest when elapsedSince older < window -> newer :: trim (older :: rest)
+            | newer :: older :: _ -> [newer; older]
+            | samples -> samples
+        let samples = sample :: (active.PointerSamplesRev |> List.filter (fun previous -> previous.Tick < sample.Tick)) |> trim
+        let velocity =
+            match List.rev samples with
+            | oldest :: next :: _ ->
+                let elapsed = elapsedSince oldest
+                let duration = min window elapsed
+                let origin =
+                    if elapsed > window then
+                        let interval = single (next.Tick - oldest.Tick) * configuration.FixedDeltaSeconds
+                        Vector2.Lerp (oldest.Position, next.Position, (elapsed - duration) / interval)
+                    else oldest.Position
+                (sample.Position - origin) / duration
+            | _ -> v2Zero
+        { active with PointerSamplesRev = samples; PointerVelocity = velocity }
+
+    /// Preview and release evaluate the same recent motion window at the current sample time.
+    let previewVelocityChange configuration mode sample active =
+        let active = updatePointer configuration sample active
+        releaseVelocityChange configuration mode active.PressPosition sample.Position active.PointerVelocity
 
     let private continueControl
         (configuration : M1ControlConfiguration)
@@ -126,13 +165,8 @@ module M1Control =
         (bodyVelocity : Vector2)
         (sample : M1PointerSample)
         (active : M1ActiveControl) =
-        let velocity = pointerVelocity configuration sample active
-        let active =
-            { active with
-                PreviousPosition = sample.Position
-                PreviousTick = sample.Tick
-                PointerVelocity = velocity }
-        let force =
+        let active = updatePointer configuration sample active
+        let acceleration =
             (match mode with
              | GrabThrow ->
                  let target = sample.Position - active.GrabOffset
@@ -141,10 +175,10 @@ module M1Control =
                  (active.BodyPositionAtPress - bodyPosition) * configuration.PullHoldSpring -
                  bodyVelocity * configuration.PullHoldDamping
              | SwipeSmack -> v2Zero)
-            |> clampMagnitude configuration.MaximumForce
+            |> clampMagnitude configuration.MaximumAcceleration
         { State = ControlActive active
-          Force = force
-          Impulse = v2Zero
+          Acceleration = acceleration
+          VelocityChange = v2Zero
           Started = false
           Released = false }
 
@@ -153,35 +187,33 @@ module M1Control =
         (mode : M1ControlMode)
         (sample : M1PointerSample)
         (active : M1ActiveControl) =
-        let measuredVelocity = pointerVelocity configuration sample active
-        let velocity = if measuredVelocity.LengthSquared () > 1.0f then measuredVelocity else active.PointerVelocity
-        let impulse = releaseImpulse configuration mode active.PressPosition sample.Position velocity
+        let velocityChange = previewVelocityChange configuration mode sample active
         { State = ControlInactive
-          Force = v2Zero
-          Impulse = impulse
+          Acceleration = v2Zero
+          VelocityChange = velocityChange
           Started = false
           Released = true }
 
-    /// Advance one control sample without mutating physics. The caller applies the bounded result.
+    /// The caller supplies contact with the rendered body and applies acceleration in world units/s^2.
     let step
         (configuration : M1ControlConfiguration)
         (mode : M1ControlMode)
         (bodyPosition : Vector2)
         (bodyVelocity : Vector2)
+        contactAllowed
         (sample : M1PointerSample)
         (state : M1ControlState) =
         match sample.Phase, state with
-        | PointerPressed, ControlInactive when Vector2.Distance (sample.Position, bodyPosition) <= configuration.GrabRadius ->
+        | PointerPressed, ControlInactive when contactAllowed ->
             let active =
                 { PressPosition = sample.Position
                   BodyPositionAtPress = bodyPosition
                   GrabOffset = sample.Position - bodyPosition
-                  PreviousPosition = sample.Position
-                  PreviousTick = sample.Tick
+                  PointerSamplesRev = [sample]
                   PointerVelocity = v2Zero }
             { State = ControlActive active
-              Force = v2Zero
-              Impulse = v2Zero
+              Acceleration = v2Zero
+              VelocityChange = v2Zero
               Started = true
               Released = false }
         | (PointerPressed | PointerHeld), ControlActive active ->
@@ -190,30 +222,37 @@ module M1Control =
             releaseControl configuration mode sample active
         | PointerIdle, ControlActive active ->
             { State = ControlActive active
-              Force = v2Zero
-              Impulse = v2Zero
+              Acceleration = v2Zero
+              VelocityChange = v2Zero
               Started = false
               Released = false }
         | _, _ ->
             { State = ControlInactive
-              Force = v2Zero
-              Impulse = v2Zero
+              Acceleration = v2Zero
+              VelocityChange = v2Zero
               Started = false
               Released = false }
 
-    /// Preserve control state while the world is paused; callers may still render the current sample.
-    let stepWhenAdvancing advancing configuration mode bodyPosition bodyVelocity sample state =
+    /// Pausing cancels the gesture, so a later release cannot launch the body after resuming.
+    let stepWhenAdvancing advancing configuration mode bodyPosition bodyVelocity contactAllowed sample state =
         if advancing then
-            step configuration mode bodyPosition bodyVelocity sample state
+            step configuration mode bodyPosition bodyVelocity contactAllowed sample state
         else
-            { State = state
-              Force = v2Zero
-              Impulse = v2Zero
+            { State = ControlInactive
+              Acceleration = v2Zero
+              VelocityChange = v2Zero
               Started = false
               Released = false }
 
 [<RequireQualifiedAccess>]
 module M1Trace =
+
+    let MaximumSamples = 600
+
+    let tryRecord sample samples =
+        let count = List.length samples
+        if count < MaximumSamples then Some ({ sample with Tick = count } :: samples)
+        else None
 
     let normalize samples =
         samples
@@ -244,6 +283,48 @@ module M1Trace =
 
     let asReplay samples =
         samples |> Array.map (fun sample -> { sample with Device = ReplayPointer })
+
+    /// Translate the gesture once onto a fresh contact, retaining timing and every relative pointer displacement.
+    let prepareReplay (bounds : Box2) origin (samples : M1PointerSample array) =
+        if Array.isEmpty samples then NoInputReplay
+        else
+            let firstPosition = samples[0].Position
+            let translated =
+                samples
+                |> Array.map (fun sample ->
+                    { sample with Position = origin + (sample.Position - firstPosition); Device = ReplayPointer })
+            if translated |> Array.exists (fun sample -> bounds.Contains sample.Position = ContainmentType.Disjoint) then
+                CancelledInputReplay ReplayOutsidePlayfield
+            else PlayingInputReplay (translated, 0)
+
+    let advanceReplay started replay =
+        match replay with
+        | PlayingInputReplay (_, 0) when not started -> CancelledInputReplay ReplayMissingContact
+        | PlayingInputReplay (samples, index) when index + 1 < samples.Length -> PlayingInputReplay (samples, index + 1)
+        | PlayingInputReplay _ -> FinishedInputReplay
+        | NoInputReplay | PendingInputReplay | FinishedInputReplay | CancelledInputReplay _ -> replay
+
+[<RequireQualifiedAccess>]
+module M1Geometry =
+
+    /// Match the nonzero winding fill, including boundary contact and concave deformations.
+    let containsPoint (point : Vector2) (polygon : Vector2 array) =
+        let mutable winding = 0
+        let mutable onEdge = false
+        if polygon.Length >= 3 then
+            for index in 0 .. polygon.Length - 1 do
+                let start = polygon[index]
+                let stop = polygon[(index + 1) % polygon.Length]
+                let edge = stop - start
+                let offset = point - start
+                let cross = edge.X * offset.Y - edge.Y * offset.X
+                let along = Vector2.Dot (offset, edge)
+                if edge.LengthSquared () > 0.000001f then
+                    if abs cross <= 0.001f && along >= 0.0f && along <= edge.LengthSquared () then onEdge <- true
+                elif Vector2.DistanceSquared (point, start) <= 0.000001f then onEdge <- true
+                if start.Y <= point.Y && stop.Y > point.Y && cross > 0.0f then winding <- winding + 1
+                elif start.Y > point.Y && stop.Y <= point.Y && cross < 0.0f then winding <- winding - 1
+        onEdge || winding <> 0
 
 [<RequireQualifiedAccess>]
 module M1Topology =
@@ -279,17 +360,17 @@ module M1Verification =
         let mutable state = ControlInactive
         let mutable position = v2Zero
         let mutable velocity = v2Zero
-        let mutable maximumForce = 0.0f
-        let mutable maximumImpulse = 0.0f
+        let mutable maximumAcceleration = 0.0f
+        let mutable maximumReleaseSpeed = 0.0f
         for sample in replaySamples do
-            let output = M1Control.step configuration mode position velocity sample state
+            let output = M1Control.step configuration mode position velocity true sample state
             state <- output.State
-            maximumForce <- max maximumForce (output.Force.Length ())
-            maximumImpulse <- max maximumImpulse (output.Impulse.Length ())
-            velocity <- velocity + output.Force * configuration.FixedDeltaSeconds * 0.02f + output.Impulse
+            maximumAcceleration <- max maximumAcceleration (output.Acceleration.Length ())
+            maximumReleaseSpeed <- max maximumReleaseSpeed (output.VelocityChange.Length ())
+            velocity <- velocity + output.Acceleration * configuration.FixedDeltaSeconds + output.VelocityChange
             velocity <- M1Control.clampSpeed configuration velocity
             position <- position + velocity * configuration.FixedDeltaSeconds
-        (position, velocity, maximumForce, maximumImpulse)
+        (position, velocity, maximumAcceleration, maximumReleaseSpeed)
 
     let evaluate () =
         let configuration = M1ControlConfiguration.defaultConfiguration
@@ -311,14 +392,14 @@ module M1Verification =
         for mode in [GrabThrow; PullSling; SwipeSmack] do
             let first = simulate mode replay
             let second = simulate mode replay
-            let (position, velocity, maximumForce, maximumImpulse) = first
+            let (position, velocity, maximumAcceleration, maximumReleaseSpeed) = first
             let (position2, velocity2, _, _) = second
             check (Vector2.Distance (position, position2) < 0.0001f && Vector2.Distance (velocity, velocity2) < 0.0001f)
                 (sprintf "%A replay is deterministic" mode)
-            check (maximumForce <= configuration.MaximumForce + 0.001f)
-                (sprintf "%A force is bounded" mode)
-            check (maximumImpulse <= configuration.MaximumImpulse + 0.001f)
-                (sprintf "%A impulse is bounded" mode)
+            check (maximumAcceleration <= configuration.MaximumAcceleration + 0.001f)
+                (sprintf "%A acceleration is bounded" mode)
+            check (maximumReleaseSpeed <= configuration.MaximumReleaseSpeed + 0.001f)
+                (sprintf "%A release velocity change is bounded" mode)
             check (velocity.Length () <= configuration.MaximumSpeed + 0.001f)
                 (sprintf "%A speed is bounded" mode)
         { Passed = passed; Checks = checks.ToArray () }
@@ -332,3 +413,4 @@ module M1Verification =
 [<RequireQualifiedAccess>]
 module M1Launch =
     let mutable Direct = false
+    let mutable Combined = false

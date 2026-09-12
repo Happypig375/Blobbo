@@ -11,6 +11,7 @@
 		<None Include="Assets/*/*" />
 		<None Include="AssetGraph.nuag" />
 		<None Include="Launch M1 Test.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<None Include="Launch Playground Test.cmd" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<None Include="Playtest/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<Compile Include="Assets.fs" />
 		<Compile Include="Simulants.fs" />
@@ -26,7 +27,9 @@
 		<Compile Include="Scene02_BoxRewind.fs" />
 		<Compile Include="Scene03_MathSimplify.fs" />
 		<Compile Include="Scene04_SquareRace.fs" />
+		<Compile Include="PlaygroundVisual.fs" />
 		<Compile Include="Scene05_HeaterCooler.fs" />
+		<Compile Include="CombinedRoom.fs" />
 		<Compile Include="Scene06_M1ControlStudy.fs" />
 		<Compile Include="BlobboPlayground.fs" />
 		<Compile Include="BlobboPlaygroundPlugin.fs" />

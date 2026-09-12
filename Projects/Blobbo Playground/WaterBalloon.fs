@@ -1,4 +1,4 @@
-﻿namespace BlobboPlayground
+namespace BlobboPlayground
 open System
 open System.Numerics
 open Box2D.NET
@@ -89,6 +89,21 @@ type WaterBalloonDispatcher () =
          nonPersistent Entity.AwakeTimeStamp 0L
          computed Entity.BodyId (fun waterBalloon _ -> { BodySource = waterBalloon; BodyIndex = internalIndex }) None
          ]
+
+    override this.Register (waterBalloon, world) =
+        World.monitor (fun _ world ->
+            if world.TimeAdvancing then
+                this.UnregisterPhysics (waterBalloon, world)
+                let spawn = (waterBalloon.GetPosition world).V2
+                let center = initialWaterBalloonCenter |> Option.map (fun center -> { center with BodyCenter = spawn })
+                let contour =
+                    initialWaterBalloonContour
+                    |> Array.map (fun point -> { point with BodyCenter = point.BodyCenter + spawn })
+                waterBalloon.SetWaterBalloonCenter center world
+                waterBalloon.SetWaterBalloonContour contour world
+                waterBalloon.SetWaterContent initialWaterContent world
+                this.RegisterPhysics (waterBalloon, world)
+            Cascade) waterBalloon.ReviveEvent waterBalloon world
 
     override this.RegisterPhysics (waterBalloon, world) =
 
@@ -278,7 +293,7 @@ type WaterBalloonDispatcher () =
         waterBalloon.SetPerimeter contourBounds world
 
         // Pop check: if the center body escapes the contour ring, emit water particles and disable the center.
-        if contour.Length = contourCount then
+        if world.TimeAdvancing && contour.Length = contourCount then
             match waterBalloon.GetWaterBalloonCenter world with
             | Some center ->
                 if not (isPointInsideContour center.BodyCenter contour) then
@@ -288,11 +303,7 @@ type WaterBalloonDispatcher () =
                     | Some emitter ->
                         let particleCount = waterBalloon.GetWaterContent world |> max 1
                         World.emitFluidParticles
-                            (SArray.init particleCount (fun _ ->
-                                let jitter = v2 (Gen.randomf * 2.0f - 1.0f) (Gen.randomf * 2.0f - 1.0f) * 6.0f
-                                { FluidParticlePosition = (centroid + jitter).V3
-                                  FluidParticleVelocity = v3 jitter.X jitter.Y 0.0f
-                                  FluidParticleConfig = "Water" }))
+                            (WaterParticles.burst "Water" centroid v2Zero 1.5f particleCount)
                             (emitter.GetFluidEmitterId world) world
                     | None -> ()
                     this.UnregisterPhysics (waterBalloon, world)

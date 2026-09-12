@@ -33,6 +33,18 @@ type Scene03_MathSimplifyDispatcher () =
                  Entity.Elevation .= -1f
                  Entity.StaticImage .= Assets.Gameplay.Background] world |> ignore
 
+            // The math bodies are dynamic glyph-sized rigid bodies, so give gravity a
+            // room-local floor above the footer instead of relying on the screen border.
+            World.doBlockBody2d "Math room floor"
+                [Entity.BodyType .= Static
+                 Entity.Position .= v3 0f -110f 0f
+                 Entity.Size .= v3 460f 10f 0f] world |> ignore
+            for (name, x) in [("Math room left wall", -225f); ("Math room right wall", 225f)] do
+                World.doBlockBody2d name
+                    [Entity.BodyType .= Static
+                     Entity.Position .= v3 x 0f 0f
+                     Entity.Size .= v3 10f 220f 0f] world |> ignore
+
             World.doEntity<MathObjectDispatcher> "Math1"
                 [Entity.Position |= v3 -100f 0f 0f
                  Entity.MathFontSize .= 24f
@@ -55,12 +67,23 @@ type Scene03_MathSimplifyDispatcher () =
    
             World.doBlockBody2d "Block"
                 [Entity.BodyType .= Kinematic
-                 Entity.Position .= v3 -224f -136f 0f
+                 // Keep the moving-wall experiment in the room above the footer and Quit control.
+                 Entity.Position .= v3 -180f -52f 0f
                  Entity.Size .= v3 10f 100f 0f
                  Entity.LinearVelocity .= v3 40f 0f 0f] world |> ignore
             let block = world.DeclaredEntity
-            if (block.GetPosition world).X > 220f then
+            if (block.GetPosition world).X > 90f then
                 block.SetLinearVelocity v3Zero world |> ignore
+
+            World.doText "Instructions"
+                [Entity.Position .= v3 0.0f 164.0f 0.0f
+                 Entity.Size .= v3 620.0f 22.0f 0.0f
+                 Entity.Absolute .= true
+                 Entity.Elevation .= 10.0f
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.FontSizing .= Some 8.0f
+                 Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)
+                 Entity.Text .= "OBSERVE: the moving wall drives collisions. Watch math expressions combine."] world
 
             // declare quit button
             if World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world then

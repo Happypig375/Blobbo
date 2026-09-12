@@ -131,6 +131,19 @@ module WorldTests =
             Assert.Equal (Constants.Engine.ExitCodeSuccess, result)
         | Left _ -> Assert.Fail ()
 
+    let [<Test; Category "Integration">] ``Construct integration world then clean up before first submission.`` () =
+        Nu.init ()
+        let worldConfig = { WorldConfig.defaultConfig with Accompanied = true }
+        let windowSize = Globals.Render.DisplayVirtualResolution * Globals.Render.DisplayScalar
+        match SdlDeps.tryMake worldConfig.SdlConfig false windowSize with
+        | Right sdlDeps ->
+            use _ = sdlDeps
+            let windowViewport = Viewport.makeWindow1 windowSize
+            let geometryViewport = Viewport.makeGeometry windowViewport.Bounds.Size
+            let world = World.make (constant None) sdlDeps worldConfig windowSize geometryViewport windowViewport (TestPlugin ())
+            World.cleanUp world
+        | Left _ -> Assert.Fail ()
+
     let [<Test; Category "Integration">] ``Run integration frame then clean up - three times.`` () =
         for _ in 0 .. dec 3 do
             ``Run integration frame then clean up.`` ()

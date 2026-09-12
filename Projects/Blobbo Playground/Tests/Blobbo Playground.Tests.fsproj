@@ -9,10 +9,29 @@
 
     <ItemGroup>
         <Compile Include="M1ExperimentTests.fs" />
-        <ProjectReference Include="../Blobbo Playground.fsproj" />
+        <Compile Include="RewindableTests.fs" />
+        <Compile Include="M1BodyTests.fs" />
+        <ProjectReference Include="../Blobbo Playground.fsproj" OutputItemType="PlaygroundRuntimeOutput" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
         <PackageReference Include="NUnit" Version="3.14.0" />
         <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
     </ItemGroup>
+
+    <!-- Nu.Pipe produces runtime assets in the owning project's output, outside transitive content copying. -->
+    <Target Name="CopyPlaygroundRuntimeAssets" AfterTargets="ResolveProjectReferences" Condition="'$(DesignTimeBuild)' != 'true' and '@(PlaygroundRuntimeOutput)' != ''">
+        <PropertyGroup>
+            <PlaygroundRuntimeDirectory>@(PlaygroundRuntimeOutput -> '%(RootDir)%(Directory)')</PlaygroundRuntimeDirectory>
+        </PropertyGroup>
+        <ItemGroup>
+            <PlaygroundRuntimeAsset Include="$(PlaygroundRuntimeDirectory)Assets/**/*" />
+            <PlaygroundRuntimeMetadata Include="$(PlaygroundRuntimeDirectory)AssetGraph.nuag;$(PlaygroundRuntimeDirectory)Overlayer.nuol" />
+        </ItemGroup>
+        <Copy SourceFiles="@(PlaygroundRuntimeAsset)" DestinationFiles="@(PlaygroundRuntimeAsset -> '$(OutDir)Assets/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true">
+            <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+        </Copy>
+        <Copy SourceFiles="@(PlaygroundRuntimeMetadata)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true">
+            <Output TaskParameter="CopiedFiles" ItemName="FileWrites" />
+        </Copy>
+    </Target>
 
 </Project>

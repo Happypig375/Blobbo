@@ -150,7 +150,7 @@ type private Box2dNetFluidEmitter =
         shapeDef.material.friction <- config.Friction
         shapeDef.material.restitution <- config.Restitution
         shapeDef.filter <- B2Filter (config.CollisionCategories, config.CollisionMask, -B2Constants.B2_SECRET_COOKIE) // random negative group to not use rigid collisions
-        shapeDef.userData <- B2UserData (bodyShapeIndex :> obj) // required to identify shape in collision events
+        shapeDef.userData <- B2UserData bodyShapeIndex // required to identify shape in collision events
         shapeDef.enablePreSolveEvents <- Constants.Physics.Collision2dFrameCompensation
         shapeDef.enableContactEvents <- true
         shapeDef.enableSensorEvents <- true
@@ -550,6 +550,14 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
         let struct (sin, cos) = MathF.SinCos halfAngle
         Quaternion (0.0f, 0.0f, sin, cos)
 
+    // NOTE: Box2D events can retain invalid shape ids after their shapes or bodies are destroyed.
+    static member private validateEventShapes shapeA shapeB =
+        if B2Worlds.b2Shape_IsValid shapeA && B2Worlds.b2Shape_IsValid shapeB then
+            let bodyA = B2Shapes.b2Shape_GetBody shapeA
+            let bodyB = B2Shapes.b2Shape_GetBody shapeB
+            B2Worlds.b2Body_IsValid bodyA && B2Worlds.b2Body_IsValid bodyB
+        else false
+
     // NOTE: since sensor events don't report collision normals, we have to compute them ourselves.
     static member private computeCollisionNormalForSensors shapeA shapeB =
         let mutable transformA = B2Shapes.b2Shape_GetBody shapeA |> B2Bodies.b2Body_GetTransform
@@ -675,8 +683,8 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
         bodyShapeDef.enableSensorEvents <- true // record sensor contacts via b2World_GetSensorEvents
         bodyShapeDef.userData <-
             B2UserData
-                ({ BodyId = { BodySource = bodySource; BodyIndex = bodyProperties.BodyIndex }
-                   BodyShapeIndex = match bodyShapePropertiesOpt with Some p -> p.BodyShapeIndex | None -> 0 } :> obj)
+                { BodyId = { BodySource = bodySource; BodyIndex = bodyProperties.BodyIndex }
+                  BodyShapeIndex = match bodyShapePropertiesOpt with Some p -> p.BodyShapeIndex | None -> 0 }
 
     static let tryCreateShapeProxy (proxy : B2ShapeProxy byref) (shape : BodyShape) (extraTransformOpt : Affine option) (origin : Vector3) =
 
@@ -779,7 +787,7 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
     // update transforms - "Note that continuous collision does not generate events. Instead they are generated the next time step. However, continuous collision will issue a b2PreSolveFcn callback."
     // we want penetration messages to be recorded on the same time step as penetration instead of the next, so we record it in the b2PreSolveFcn callback.
     static let preSolveCallback =
-        b2PreSolveFcn (fun shapeIdA shapeIdB _point normal context -> // can be called from multiple threads at once - write to concurrent collections only
+        b2PreSolveFcn (fun shapeIdA shapeIdB point normal context -> // can be called from multiple threads at once - write to concurrent collections only
             let contactsTracker = context :?> Box2dNetPhysicsEngineContactsTracker
             if not (contactsTracker.ExistingContacts.Contains (shapeIdA, shapeIdB)) then
                 let bodyShapeA = (B2Shapes.b2Shape_GetUserData shapeIdA).GetRef<BodyShapeIndex> ()
@@ -918,8 +926,8 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
         chainDef.enableSensorEvents <- true // record sensor contacts for b2World_GetSensorEvents
         chainDef.userData <-
             B2UserData
-                ({ BodyId = { BodySource = bodySource; BodyIndex = bodyProperties.BodyIndex }
-                   BodyShapeIndex = match contourShape.PropertiesOpt with Some p -> p.BodyShapeIndex | None -> 0 } :> obj)
+                { BodyId = { BodySource = bodySource; BodyIndex = bodyProperties.BodyIndex }
+                  BodyShapeIndex = match contourShape.PropertiesOpt with Some p -> p.BodyShapeIndex | None -> 0 }
         B2Shapes.b2CreateChain (body, &chainDef) |> ignore<B2ChainId>
 
     static member private attachBodyConvexHull bodySource bodyProperties (points : Vector3 array) transformOpt (propertiesOpt : BodyShapeProperties option) (body : B2BodyId) =
@@ -1057,7 +1065,7 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                 | GravityIgnore -> bodyDef.gravityScale <- 0.0f; ValueNone
             else ValueNone
         bodyDef.isBullet <- match bodyProperties.CollisionDetection with Continuous -> true | Discrete -> false
-        bodyDef.userData <- B2UserData (bodyId :> obj)
+        bodyDef.userData <- B2UserData bodyId
 
         // make and attempt to add the body
         let bodyId = { BodySource = createBodyMessage.BodyId.BodySource; BodyIndex = bodyProperties.BodyIndex }
@@ -1204,7 +1212,7 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                 match (physicsEngine.Bodies.TryGetValue bodyId, physicsEngine.Bodies.TryGetValue body2Id) with
                 | ((true, body), (true, body2)) ->
                     let joint = bodyJoint.CreateBodyJoint Box2dNetPhysicsEngine.toPhysics Box2dNetPhysicsEngine.toPhysicsV2 body body2 physicsEngine.PhysicsContextId
-                    B2Joints.b2Joint_SetUserData (joint, B2UserData (bodyJointId :> obj))
+                    B2Joints.b2Joint_SetUserData (joint, B2UserData bodyJointId)
                     B2Joints.b2Joint_SetCollideConnected (joint, bodyJointProperties.CollideConnected)
                     B2Joints.b2Joint_WakeBodies joint
                     if physicsEngine.Joints.TryAdd (bodyJointId, joint) then
@@ -1746,7 +1754,7 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                 match B2Bodies.b2Body_GetType body with
                 | B2BodyType.b2_dynamicBody -> // dynamic = random color per instance
                     match (B2Bodies.b2Body_GetUserData body).GetRef<obj> () with null -> B2Bodies.b2Body_GetName body :> obj | d -> d
-                    |> hash |> uint |> colorPacked |> _.WithA(1f) // use the Nu BodyIndex because physics engine bodies are recreated on property assignment
+                    |> hash |> uint |> colorPacked |> _.WithA(1.0f) // use the Nu BodyIndex because physics engine bodies are recreated on property assignment
                 | B2BodyType.b2_kinematicBody -> // keyframed
                     Color.Green
                 | _ -> // static or anything else
@@ -1762,10 +1770,10 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                 renderContext.DrawCircle (position, radius, color)
             | B2ShapeType.b2_capsuleShape ->
                 let capsule = B2Shapes.b2Shape_GetCapsule shape
-                let mutable localCenter1 = capsule.center1
-                let mutable localCenter2 = capsule.center2
-                let center1 = B2MathFunction.b2TransformPoint (&transform, &localCenter1) |> Box2dNetPhysicsEngine.toPixelV2
-                let center2 = B2MathFunction.b2TransformPoint (&transform, &localCenter2) |> Box2dNetPhysicsEngine.toPixelV2
+                let mutable center1Local = capsule.center1
+                let mutable center2Local = capsule.center2
+                let center1 = B2MathFunction.b2TransformPoint (&transform, &center1Local) |> Box2dNetPhysicsEngine.toPixelV2
+                let center2 = B2MathFunction.b2TransformPoint (&transform, &center2Local) |> Box2dNetPhysicsEngine.toPixelV2
                 let radius = Box2dNetPhysicsEngine.toPixel capsule.radius
                 let direction = center2 - center1
                 let perpendicular = Vector2(-direction.Y, direction.X).Normalized * radius
@@ -1775,39 +1783,39 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                 renderContext.DrawLine (center1 - perpendicular, center2 - perpendicular, color)
             | B2ShapeType.b2_segmentShape ->
                 let segment = B2Shapes.b2Shape_GetSegment shape
-                let mutable localStart = segment.point1
-                let mutable localStop = segment.point2
-                let start = B2MathFunction.b2TransformPoint (&transform, &localStart) |> Box2dNetPhysicsEngine.toPixelV2
-                let stop = B2MathFunction.b2TransformPoint (&transform, &localStop) |> Box2dNetPhysicsEngine.toPixelV2
+                let mutable startLocal = segment.point1
+                let mutable stopLocal = segment.point2
+                let start = B2MathFunction.b2TransformPoint (&transform, &startLocal) |> Box2dNetPhysicsEngine.toPixelV2
+                let stop = B2MathFunction.b2TransformPoint (&transform, &stopLocal) |> Box2dNetPhysicsEngine.toPixelV2
                 renderContext.DrawLine (start, stop, color)
             | B2ShapeType.b2_polygonShape ->
                 let polygon = B2Shapes.b2Shape_GetPolygon shape
                 if polygon.radius = 0.0f then
                     for i in 0 .. dec polygon.count do
-                        let mutable localStart = polygon.vertices[i]
-                        let mutable localStop = polygon.vertices[if i < dec polygon.count then inc i else 0]
-                        let start = B2MathFunction.b2TransformPoint (&transform, &localStart) |> Box2dNetPhysicsEngine.toPixelV2
-                        let stop = B2MathFunction.b2TransformPoint (&transform, &localStop) |> Box2dNetPhysicsEngine.toPixelV2
+                        let mutable startLocal = polygon.vertices[i]
+                        let mutable stopLocal = polygon.vertices[if i < dec polygon.count then inc i else 0]
+                        let start = B2MathFunction.b2TransformPoint (&transform, &startLocal) |> Box2dNetPhysicsEngine.toPixelV2
+                        let stop = B2MathFunction.b2TransformPoint (&transform, &stopLocal) |> Box2dNetPhysicsEngine.toPixelV2
                         renderContext.DrawLine (start, stop, color)
                 else
                     let radius = Box2dNetPhysicsEngine.toPixel polygon.radius
                     for i in 0 .. dec polygon.count do
-                        let mutable localStart = polygon.vertices[i]
-                        let mutable localStop = polygon.vertices[if i < dec polygon.count then inc i else 0]
+                        let mutable startLocal = polygon.vertices[i]
+                        let mutable stopLocal = polygon.vertices[if i < dec polygon.count then inc i else 0]
                         let mutable rotation = transform.q
                         let mutable normal = polygon.normals[i]
-                        let start = B2MathFunction.b2TransformPoint (&transform, &localStart) |> Box2dNetPhysicsEngine.toPixelV2
-                        let stop = B2MathFunction.b2TransformPoint (&transform, &localStop) |> Box2dNetPhysicsEngine.toPixelV2
+                        let start = B2MathFunction.b2TransformPoint (&transform, &startLocal) |> Box2dNetPhysicsEngine.toPixelV2
+                        let stop = B2MathFunction.b2TransformPoint (&transform, &stopLocal) |> Box2dNetPhysicsEngine.toPixelV2
                         let perpendicular = B2MathFunction.b2RotateVector (&rotation, &normal) * radius
                         let perpendicular = v2 perpendicular.X perpendicular.Y
                         renderContext.DrawCircle (start, radius, color)
                         renderContext.DrawLine (start + perpendicular, stop + perpendicular, color)
             | B2ShapeType.b2_chainSegmentShape ->
                 let segment = (B2Shapes.b2Shape_GetChainSegment shape).segment
-                let mutable localStart = segment.point1
-                let mutable localStop = segment.point2
-                let start = B2MathFunction.b2TransformPoint (&transform, &localStart) |> Box2dNetPhysicsEngine.toPixelV2
-                let stop = B2MathFunction.b2TransformPoint (&transform, &localStop) |> Box2dNetPhysicsEngine.toPixelV2
+                let mutable startLocal = segment.point1
+                let mutable stopLocal = segment.point2
+                let start = B2MathFunction.b2TransformPoint (&transform, &startLocal) |> Box2dNetPhysicsEngine.toPixelV2
+                let stop = B2MathFunction.b2TransformPoint (&transform, &stopLocal) |> Box2dNetPhysicsEngine.toPixelV2
                 renderContext.DrawLine (start, stop, color)
             | _ -> ()
 
@@ -2028,45 +2036,49 @@ type [<ReferenceEquality>] Box2dNetPhysicsEngine =
                     // collect penetrations for non-sensors from begin contact events, which are performant but one time step late compared to the actual penetration
                     for i in 0 .. dec contacts.beginCount do
                         let penetration = &contacts.beginEvents[i]
-                        let bodyShapeA = (B2Shapes.b2Shape_GetUserData penetration.shapeIdA).GetRef<BodyShapeIndex> ()
-                        let bodyShapeB = (B2Shapes.b2Shape_GetUserData penetration.shapeIdB).GetRef<BodyShapeIndex> ()
-                        let normal =
-                            if B2Worlds.b2Contact_IsValid penetration.contactId then
-                                let contact = B2Contacts.b2Contact_GetData penetration.contactId
-                                v3 contact.manifold.normal.X contact.manifold.normal.Y 0.0f
-                            else
-                                let normal = Box2dNetPhysicsEngine.computeCollisionNormalForSensors penetration.shapeIdA penetration.shapeIdB
-                                v3 normal.X normal.Y 0.0f
-                        physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB; Normal = normal })
-                        physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA; Normal = -normal })
+                        if Box2dNetPhysicsEngine.validateEventShapes penetration.shapeIdA penetration.shapeIdB then
+                            let bodyShapeA = (B2Shapes.b2Shape_GetUserData penetration.shapeIdA).GetRef<BodyShapeIndex> ()
+                            let bodyShapeB = (B2Shapes.b2Shape_GetUserData penetration.shapeIdB).GetRef<BodyShapeIndex> ()
+                            let normal =
+                                if B2Worlds.b2Contact_IsValid penetration.contactId then
+                                    let contact = B2Contacts.b2Contact_GetData penetration.contactId
+                                    v3 contact.manifold.normal.X contact.manifold.normal.Y 0.0f
+                                else
+                                    let normal = Box2dNetPhysicsEngine.computeCollisionNormalForSensors penetration.shapeIdA penetration.shapeIdB
+                                    v3 normal.X normal.Y 0.0f
+                            physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB; Normal = normal })
+                            physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA; Normal = -normal })
 
                 // collect separations for non-sensors that aren't ground separations by characters
                 for i in 0 .. dec contacts.endCount do
                     let separation = &contacts.endEvents[i]
                     physicsEngine.ContactsTracker.ExistingContacts.Remove (separation.shapeIdA, separation.shapeIdB) |> ignore
-                    let bodyShapeA = (B2Shapes.b2Shape_GetUserData separation.shapeIdA).GetRef<BodyShapeIndex> ()
-                    let bodyShapeB = (B2Shapes.b2Shape_GetUserData separation.shapeIdB).GetRef<BodyShapeIndex> ()
-                    physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB })
-                    physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA })
+                    if Box2dNetPhysicsEngine.validateEventShapes separation.shapeIdA separation.shapeIdB then
+                        let bodyShapeA = (B2Shapes.b2Shape_GetUserData separation.shapeIdA).GetRef<BodyShapeIndex> ()
+                        let bodyShapeB = (B2Shapes.b2Shape_GetUserData separation.shapeIdB).GetRef<BodyShapeIndex> ()
+                        physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB })
+                        physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA })
 
                 // collect penetrations for sensors that aren't ground penetrations by characters
                 let sensorEvents = B2Worlds.b2World_GetSensorEvents physicsEngine.PhysicsContextId
                 for i in 0 .. dec sensorEvents.beginCount do
                     let sensorEvent = &sensorEvents.beginEvents[i]
-                    let bodyShapeA = (B2Shapes.b2Shape_GetUserData sensorEvent.sensorShapeId).GetRef<BodyShapeIndex> ()
-                    let bodyShapeB = (B2Shapes.b2Shape_GetUserData sensorEvent.visitorShapeId).GetRef<BodyShapeIndex> ()
-                    let normal = Box2dNetPhysicsEngine.computeCollisionNormalForSensors sensorEvent.sensorShapeId sensorEvent.visitorShapeId
-                    let normal = Vector3 (normal.X, normal.Y, 0.0f)
-                    physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB; Normal = normal })
-                    physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA; Normal = -normal })
+                    if Box2dNetPhysicsEngine.validateEventShapes sensorEvent.sensorShapeId sensorEvent.visitorShapeId then
+                        let bodyShapeA = (B2Shapes.b2Shape_GetUserData sensorEvent.sensorShapeId).GetRef<BodyShapeIndex> ()
+                        let bodyShapeB = (B2Shapes.b2Shape_GetUserData sensorEvent.visitorShapeId).GetRef<BodyShapeIndex> ()
+                        let normal = Box2dNetPhysicsEngine.computeCollisionNormalForSensors sensorEvent.sensorShapeId sensorEvent.visitorShapeId
+                        let normal = v3 normal.X normal.Y 0.0f
+                        physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB; Normal = normal })
+                        physicsEngine.IntegrationMessages.Add (BodyPenetrationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA; Normal = -normal })
 
                 // collect separations for sensors that aren't ground separations by characters
                 for i in 0 .. dec sensorEvents.endCount do
                     let sensorEvent = &sensorEvents.endEvents[i]
-                    let bodyShapeA = (B2Shapes.b2Shape_GetUserData sensorEvent.sensorShapeId).GetRef<BodyShapeIndex> ()
-                    let bodyShapeB = (B2Shapes.b2Shape_GetUserData sensorEvent.visitorShapeId).GetRef<BodyShapeIndex> ()
-                    physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB })
-                    physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA })
+                    if Box2dNetPhysicsEngine.validateEventShapes sensorEvent.sensorShapeId sensorEvent.visitorShapeId then
+                        let bodyShapeA = (B2Shapes.b2Shape_GetUserData sensorEvent.sensorShapeId).GetRef<BodyShapeIndex> ()
+                        let bodyShapeB = (B2Shapes.b2Shape_GetUserData sensorEvent.visitorShapeId).GetRef<BodyShapeIndex> ()
+                        physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeA; BodyShapeTarget = bodyShapeB })
+                        physicsEngine.IntegrationMessages.Add (BodySeparationMessage { BodyShapeSource = bodyShapeB; BodyShapeTarget = bodyShapeA })
                     
                 // collect transforms that aren't by characters nor fluid particles
                 let bodyEvents = B2Worlds.b2World_GetBodyEvents physicsEngine.PhysicsContextId
@@ -2193,6 +2205,7 @@ namespace Box2D.NET.Debugging
 open System
 open Box2D.NET
 
+/// Conveys debugging information about a Box2D.NET world.
 type B2WorldIdDebuggerDisplay (impl) =
     member this.AwakeBodyCount = B2Worlds.b2World_GetAwakeBodyCount impl
     member this.BodyEvents = B2Worlds.b2World_GetBodyEvents impl
@@ -2211,6 +2224,7 @@ type B2WorldIdDebuggerDisplay (impl) =
     member this.SensorEvents = B2Worlds.b2World_GetSensorEvents impl
     member this.UserData with get () = B2Worlds.b2World_GetUserData impl and set value = B2Worlds.b2World_SetUserData (impl, value)
 
+/// Conveys debugging information about a Box2D.NET body.
 type B2BodyIdDebuggerDisplay (impl) =
     member this.AABB = B2Bodies.b2Body_ComputeAABB impl
     member this.AngularDamping with get () = B2Bodies.b2Body_GetAngularDamping impl and set value = B2Bodies.b2Body_SetAngularDamping (impl, value)
@@ -2270,6 +2284,7 @@ type B2BodyIdDebuggerDisplay (impl) =
     member this.World = B2Bodies.b2Body_GetWorld impl
     member this.WorldCenterOfMass = B2Bodies.b2Body_GetWorldCenterOfMass impl
     
+/// Conveys debugging information about a Box2D.NET shape.
 type B2ShapeIdDebuggerDisplay (impl) =
     member this.AABB = B2Shapes.b2Shape_GetAABB impl
     member this.AreSensorEventsEnabled with get () = B2Shapes.b2Shape_AreSensorEventsEnabled impl and set value = B2Shapes.b2Shape_EnableSensorEvents (impl, value)
@@ -2314,6 +2329,7 @@ type B2ShapeIdDebuggerDisplay (impl) =
     member this.UserMaterial with get () = B2Shapes.b2Shape_GetUserMaterial impl and set value = B2Shapes.b2Shape_SetUserMaterial (impl, value)
     member this.World = B2Shapes.b2Shape_GetWorld impl
 
+/// Conveys debugging information about a Box2D.NET chain.
 type B2ChainIdDebuggerDisplay (impl) =
     member this.IsValid = B2Worlds.b2Chain_IsValid impl
     member this.SegmentCount = B2Shapes.b2Chain_GetSegmentCount impl
@@ -2328,6 +2344,7 @@ type B2ChainIdDebuggerDisplay (impl) =
     member this.SurfaceMaterialCount = B2Shapes.b2Chain_GetSurfaceMaterialCount impl
     member this.World = B2Shapes.b2Chain_GetWorld impl
 
+/// Conveys debugging information about a Box2D.NET joint.
 type B2JointIdDebuggerDisplay (impl) =
     member this.AngularSeparation = B2Joints.b2Joint_GetAngularSeparation impl
     member this.BodyA = B2Joints.b2Joint_GetBodyA impl

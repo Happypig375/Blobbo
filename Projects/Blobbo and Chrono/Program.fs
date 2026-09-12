@@ -1,8 +1,8 @@
 ﻿namespace BlobboAndChrono
 open System
 open System.IO
-open Nu
 open SDL
+open Nu
 module Program =
 
     // this the entry point for your Nu application
@@ -18,7 +18,7 @@ module Program =
         let sdlWindowConfig =
             { SdlWindowConfig.defaultConfig with
                 WindowTitle = "Blobbo and Chrono"
-                WindowFlags = SdlWindowConfig.defaultConfig.WindowFlags ||| SDL_WindowFlags.SDL_WINDOW_TRANSPARENT ||| SDL_WindowFlags.SDL_WINDOW_ALWAYS_ON_TOP }
+                WindowFlags = SdlWindowConfig.defaultConfig.WindowFlags &&& ~~~SDL_WindowFlags.SDL_WINDOW_RESIZABLE }
 
         // this specifies the configuration of the game engine's use of SDL
         let sdlConfig = { SdlConfig.defaultConfig with WindowConfig = sdlWindowConfig }

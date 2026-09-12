@@ -854,7 +854,8 @@ module WorldModule2 =
         static member getDisplayVirtualResolution () =
             Globals.Render.DisplayVirtualResolution
 
-        /// Set the display's virtual resolution and synchronously resynchronize window state and viewports.
+        /// Set the display's virtual resolution and resynchronize drawable window state and viewports.
+        /// A minimized window with zero drawable size is resynchronized when it is restored.
         static member setDisplayVirtualResolution (resolution : Vector2i) (world : World) =
             if resolution.X <= 0 || resolution.Y <= 0 then
                 invalidArg (nameof resolution) "Display virtual resolution dimensions must be positive."
@@ -1172,6 +1173,8 @@ module WorldModule2 =
             | SDL_EventType.SDL_EVENT_WINDOW_RESIZED
             | SDL_EventType.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
             | SDL_EventType.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED
+            | SDL_EventType.SDL_EVENT_WINDOW_MINIMIZED
+            | SDL_EventType.SDL_EVENT_WINDOW_RESTORED
             | SDL_EventType.SDL_EVENT_WINDOW_ENTER_FULLSCREEN
             | SDL_EventType.SDL_EVENT_WINDOW_LEAVE_FULLSCREEN ->
                 World.processWindowResize world
@@ -1802,7 +1805,7 @@ module WorldModule2 =
                             // compute cull frustum
                             let shadowRotation = light.GetRotation world
                             let shadowCutoff = light.GetLightCutoff world
-                            let shadowOrigin = Light3dFacetModule.getDirectionalLightOrigin shadowRotation shadowCutoff offsetForwardScalar world
+                            let shadowOrigin = Light3dModule.getDirectionalLightOrigin shadowRotation shadowCutoff offsetForwardScalar world
                             let shadowForward = shadowRotation.Down
                             let shadowUp = shadowForward.OrthonormalUp
                             let shadowNearDistance = Constants.Render.NearPlaneDistanceInterior
@@ -1824,7 +1827,7 @@ module WorldModule2 =
                             let lightId = light.GetId world
                             let shadowRotation = light.GetRotation world
                             let shadowCutoff = light.GetLightCutoff world
-                            let shadowOrigin = Light3dFacetModule.getCascadedLightOrigin shadowRotation shadowCutoff world
+                            let shadowOrigin = Light3dModule.getCascadedLightOrigin shadowRotation shadowCutoff world
                             let shadowRotation = light.GetRotation world
                             let shadowForward = shadowRotation.Down
                             let shadowUp = shadowForward.OrthonormalUp
@@ -2128,7 +2131,11 @@ module WorldModule2 =
                                                                     // rendering since SDL's window resize callback can
                                                                     // come in a frame late
                                                                     if  windowProperties.WidthPixels < world.WindowViewport.Bounds.Width ||
-                                                                        windowProperties.HeightPixels < world.WindowViewport.Bounds.Height then
+                                                                        windowProperties.HeightPixels < world.WindowViewport.Bounds.Height ||
+                                                                        world.WindowViewport.Inner.Width > world.WindowViewport.Bounds.Width ||
+                                                                        world.WindowViewport.Inner.Height > world.WindowViewport.Bounds.Height ||
+                                                                        world.WindowViewport.Bounds.Width > world.WindowViewport.Outer.Width ||
+                                                                        world.WindowViewport.Bounds.Height > world.WindowViewport.Outer.Height then
                                                                         World.processWindowResize world
 
                                                                     // process rendering (2/2)

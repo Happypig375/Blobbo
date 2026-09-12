@@ -5,6 +5,17 @@
 These instructions apply repository-wide. A nested `AGENTS.md` or `AGENTS.override.md` takes
 precedence in its directory. `Standard.md` is the repository's F# code standard.
 
+## Branch ownership and upstream review
+
+Agent instructions, skills, and context remain on the user's fork branch, `blobbo`, and must not be
+included in an upstream PR.
+Eye field-of-view or eye-margin changes intended for upstream target `mveb/eye-margin`; other
+upstream-eligible changes target `master`. Split mixed files by behavior rather than routing a whole
+file to one upstream branch. Human review of code and upstream-divergent comments is required before
+opening any upstream PR, including a draft; independent agent review is not human approval. Ordinary
+commits and pushes to the user's `blobbo` fork do not require that upstream-PR gate. Do not infer that
+human approval has been granted.
+
 The canonical skill root is `.agents/skills/`. Treat references to `.github/skills/` as stale and
 repair them when editing the containing file.
 

@@ -14,6 +14,17 @@ module M1BodyModel =
     let RingCenterRadius = 13.0f
     let StableHullRadius = 34.0f
 
+    /// All comparison bodies use Density 1. Match the backend's sphere-radius conversion exactly.
+    let bodyMass candidate bodyIndex =
+        let radius =
+            match candidate with
+            | LegacyGraph ->
+                if bodyIndex = CenterBodyIndex then BlobboBodyModel.CenterRadius else BlobboBodyModel.ContourRadius
+            | SimplifiedRing -> if bodyIndex = CenterBodyIndex then RingCenterRadius else RingNodeRadius
+            | StableHull -> StableHullRadius
+        let physicsRadius = max Constants.Physics.Collision2dLinearSlop (radius / Constants.Engine.Meter2d)
+        MathF.PI * physicsRadius * physicsRadius
+
     let bodyIds candidate (entity : Entity) =
         match candidate with
         | LegacyGraph ->
@@ -35,6 +46,23 @@ module M1BodyModel =
                     BodyRotation = Quaternion.Identity
                     BodyLinearVelocity = v2Zero
                     BodyAngularVelocity = v2Zero }|]
+
+[<RequireQualifiedAccess>]
+module M1BodyControl =
+
+    /// Distribute world-unit acceleration and delta-v by constituent mass, preserving contact velocity.
+    let apply configuration candidate subject (output : M1ControlOutput) world =
+        for bodyId in M1BodyModel.bodyIds candidate subject do
+            if World.getBodyExists bodyId world then
+                let mass = M1BodyModel.bodyMass candidate bodyId.BodyIndex
+                if output.Acceleration.LengthSquared () > 0.0f then
+                    World.applyBodyForce (output.Acceleration * mass).V3 None bodyId world
+                let velocity = (World.getBodyLinearVelocity bodyId world).V2
+                let releaseVelocity = M1Control.releaseVelocity configuration output.VelocityChange velocity
+                if output.Released then
+                    World.applyBodyLinearImpulse ((releaseVelocity - velocity) * mass).V3 None bodyId world
+                elif Vector2.DistanceSquared (velocity, releaseVelocity) > 0.001f then
+                    World.setBodyLinearVelocity releaseVelocity.V3 bodyId world
 
 module [<AutoOpen>] M1BlobboExtensions =
     type Entity with
@@ -65,6 +93,30 @@ module [<AutoOpen>] M1BlobboExtensions =
 
 [<RequireQualifiedAccess>]
 module M1BlobboVisual =
+
+    let bodyPoints candidate (entity : Entity) world =
+        match candidate with
+        | LegacyGraph -> BlobboBodyModel.renderedPoints (entity.GetBlobboContour world)
+        | SimplifiedRing ->
+            let center = entity.GetM1BodyCenter world
+            entity.GetM1BodyContour world
+            |> Array.map (fun point ->
+                let radial = point.BodyCenter - center.BodyCenter
+                let length = radial.Length ()
+                point.BodyCenter + if length > 0.0001f then radial * (M1BodyModel.RingNodeRadius / length) else v2Zero)
+        | StableHull ->
+            let center = entity.GetM1BodyCenter world
+            let pull = entity.GetM1VisualPull world
+            let deformationVector = pull * 0.012f + center.BodyLinearVelocity * 0.025f
+            let deformation = min 0.24f (deformationVector.Length () / M1BodyModel.StableHullRadius)
+            let direction = if deformationVector.LengthSquared () > 0.0001f then atan2 deformationVector.Y deformationVector.X else 0.0f
+            let phase = single (world.UpdateTime % 360L) * 0.055f
+            Array.init 24 (fun index ->
+                let angle = single index * MathF.TWO_PI / 24.0f
+                let directional = cos (2.0f * (angle - direction)) * deformation
+                let wobble = sin (3.0f * angle + phase) * 0.025f
+                let radius = M1BodyModel.StableHullRadius * (1.0f + directional + wobble)
+                center.BodyCenter + v2 (cos angle * radius) (sin angle * radius))
 
     let sprite (position : Vector2) (size : Vector2) (elevation : single) (colorValue : Color) world =
         let image = Assets.Default.Ball
@@ -301,6 +353,8 @@ type M1BlobboDispatcher () =
                         (v2Dup (M1BodyModel.RingCenterRadius * 2.0f)))
             | LegacyGraph -> box2Zero
         entity.SetPerimeter perimeter.Box3 world
+        // Publishing the physical perimeter also changes Position; it is not an external fixture reset.
+        entity.SetM1AppliedPosition (entity.GetPosition world) world
 
     override _.Render (_, entity, world) =
         let candidate = entity.GetM1BodyCandidate world
@@ -309,28 +363,7 @@ type M1BlobboDispatcher () =
         let size =
             let size = (entity.GetSize world).V2
             v2 (max 0.0001f size.X) (max 0.0001f size.Y)
-        let points =
-            match candidate with
-            | SimplifiedRing ->
-                entity.GetM1BodyContour world
-                |> Array.map (fun point ->
-                    let radial = point.BodyCenter - center.BodyCenter
-                    let length = radial.Length ()
-                    point.BodyCenter + if length > 0.0001f then radial * (M1BodyModel.RingNodeRadius / length) else v2Zero)
-            | StableHull ->
-                let pull = entity.GetM1VisualPull world
-                let velocity = center.BodyLinearVelocity
-                let deformationVector = pull * 0.012f + velocity * 0.025f
-                let deformation = min 0.24f (deformationVector.Length () / M1BodyModel.StableHullRadius)
-                let direction = if deformationVector.LengthSquared () > 0.0001f then atan2 deformationVector.Y deformationVector.X else 0.0f
-                let phase = single (world.UpdateTime % 360L) * 0.055f
-                Array.init 24 (fun index ->
-                    let angle = single index * MathF.TWO_PI / 24.0f
-                    let directional = cos (2.0f * (angle - direction)) * deformation
-                    let wobble = sin (3.0f * angle + phase) * 0.025f
-                    let radius = M1BodyModel.StableHullRadius * (1.0f + directional + wobble)
-                    center.BodyCenter + v2 (cos angle * radius) (sin angle * radius))
-            | LegacyGraph -> Array.empty
+        let points = M1BlobboVisual.bodyPoints candidate entity world
 
         let renderFilled elevation colorValue scale =
             if points.Length >= 3 then

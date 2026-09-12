@@ -162,7 +162,8 @@ type Scene04_SquareRaceDispatcher () =
             World.beginGroup "Group" [] world
             // declare border
             World.doBlockBody2d "Border"
-                [Entity.Size .= (World.getDisplayVirtualResolution ()).V3
+                [Entity.Position .= v3 0.0f 20.0f 0.0f
+                 Entity.Size .= v3 620.0f 260.0f 0.0f
                  Entity.BodyShape .= ContourShape
                      { Links =
                          [|v3 -0.5f 0.5f 0f
@@ -210,6 +211,16 @@ type Scene04_SquareRaceDispatcher () =
                 [Entity.Position |= v3 -68f -32f 0f
                  Entity.LinearVelocity |= v3 -32f -0f 0f
                  Entity.FillColor @= smoothRainbow (world.ClockTime / 2.0f)] world |> ignore
+
+            World.doText "Instructions"
+                [Entity.Position .= v3 0.0f 164.0f 0.0f
+                 Entity.Size .= v3 620.0f 22.0f 0.0f
+                 Entity.Absolute .= true
+                 Entity.Elevation .= 10.0f
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.FontSizing .= Some 8.0f
+                 Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)
+                 Entity.Text .= "OBSERVE: pupils follow velocity; trails show motion. No drag controls in this room."] world
 
             // declare quit button
             if World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"] world then

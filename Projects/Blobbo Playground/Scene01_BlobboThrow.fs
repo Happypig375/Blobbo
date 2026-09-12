@@ -84,6 +84,26 @@ type Scene01_BlobboThrowDispatcher () =
             let configuration = Scene01ExperimentConfiguration.defaultConfiguration
             let telemetry = screen.GetScene01Telemetry world
             World.beginGroup (sprintf "Fixture %d" telemetry.FixtureVersion) [] world
+            let pauseButton =
+                World.doButton "Pause"
+                    [Entity.Position .= v3 -104f -144f 0f
+                     Entity.Size .= v3 96f 22f 0f
+                     Entity.Elevation .= 10f
+                     Entity.FontSizing .= Some 8f
+                     Entity.Text @= (if world.TimeAdvancing then "Pause (Space)" else "Resume (Space)")] world
+            let pauseRequested = pauseButton || World.isKeyboardKeyPressed KeyboardKey.Space world
+            let wasTimeAdvancing = world.TimeAdvancing
+            let gameplayAdvancing = wasTimeAdvancing && not pauseRequested
+            if pauseRequested then
+                // Clear first when transitioning into pause; the time setter may become
+                // observable only after this process, but the joint must disappear now.
+                if wasTimeAdvancing then
+                    screen.SetHeldEntity Address.empty world
+                World.setTimeAdvancing (not wasTimeAdvancing) world
+            // A paused scene must never retain a drag owner; clearing before declarations
+            // also prevents the mouse joint from being reconstructed for this frame.
+            if not wasTimeAdvancing then
+                screen.SetHeldEntity Address.empty world
             // declare border
             World.doBlockBody2d "Border"
                 [Entity.Size .= (World.getDisplayVirtualResolution ()).V3
@@ -103,7 +123,7 @@ type Scene01_BlobboThrowDispatcher () =
                  [Entity.Size .= configuration.FluidEmitterSize
                   Entity.FluidParticlesMax .= configuration.FluidParticleCap] world
             let fluidEmitter = world.DeclaredEntity
-            if World.isKeyboardKeyDown KeyboardKey.Grave world then
+            if gameplayAdvancing && World.isKeyboardKeyDown KeyboardKey.Grave world then
                let spawn = v2 0f 0f
                World.emitFluidParticles (SArray.init 32 (fun _ ->
                    let jitter = v2 (Gen.randomf * 2f - 1f) (Gen.randomf - 0.5f) * 32.0f
@@ -126,14 +146,14 @@ type Scene01_BlobboThrowDispatcher () =
             let eyeBounds = World.getEye2dBounds world
             let raw = World.getMousePosition2dWorld false world
             let mousePosition = v3 (max eyeBounds.Min.X (min eyeBounds.Max.X raw.X)) (max eyeBounds.Min.Y (min eyeBounds.Max.Y raw.Y)) 0f
-            let heldBeforeInput = screen.GetHeldEntity world <> Address.empty
+            let heldBeforeInput = gameplayAdvancing && screen.GetHeldEntity world <> Address.empty
             let dt = 1.0 / configuration.PointerUpdateRateHz
             let pointerVelocity =
                 match telemetry.PreviousPointerOpt, dt with
                 | Some previous, delta when delta > 0.0 -> (mousePosition.V2 - previous) / single delta
                 | _ -> v2Zero
             let heldAfterInput =
-                if blobbo.GetTouched world then
+                if gameplayAdvancing && blobbo.GetTouched world then
                     screen.SetHeldEntity blobbo.EntityAddress world
                     true
                 elif heldBeforeInput && World.isMouseButtonReleased MouseLeft world then
@@ -180,8 +200,6 @@ type Scene01_BlobboThrowDispatcher () =
             World.beginGroup "Interface" [] world
 
             if screen.GetSelected world then
-                if World.isKeyboardKeyPressed KeyboardKey.Space world then
-                    World.setTimeAdvancing (not world.TimeAdvancing) world
                 if world.TimeAdvancing then ()
                 else
                     World.doStaticSprite "Overlay" 
@@ -190,7 +208,7 @@ type Scene01_BlobboThrowDispatcher () =
                          Entity.Absolute .= true
                          Entity.StaticImage .= Assets.Default.White
                          Entity.Color .= color 0.5f 0.5f 0.5f 0.5f] world |> ignore
-                if World.isKeyboardKeyPressed KeyboardKey.Enter world then
+                if gameplayAdvancing && World.isKeyboardKeyPressed KeyboardKey.Enter world then
                     World.publish () blobbo.ReviveEvent blobbo world
 
             let fluidParticleCount = (fluidEmitter.GetFluidParticles world).Length
@@ -201,7 +219,7 @@ type Scene01_BlobboThrowDispatcher () =
             let angularSpeed = center.BodyAngularVelocity.Length ()
             let telemetry =
                 match telemetry.ReleaseElapsedSecondsOpt, telemetry.SettleDurationOpt with
-                | Some elapsed, None when not held ->
+                | Some elapsed, None when not held && gameplayAdvancing ->
                     let settlingElapsed = telemetry.SettlingElapsedSeconds + dt
                     let settled = speed <= configuration.SettleSpeedThreshold && angularSpeed <= configuration.SettleAngularSpeedThreshold
                     if settled && settlingElapsed >= configuration.SettleHoldSeconds then
@@ -237,6 +255,8 @@ type Scene01_BlobboThrowDispatcher () =
                  Entity.Elevation .= 10f
                  Entity.FontSizing .= Some 8f
                  Entity.Justification .= Justified (JustifyLeft, JustifyMiddle)
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.TextColor .= Color.White
                  Entity.Text @= sprintf "M0 frame %d | frame %.2fms | physics %.2fms" world.UpdateTime world.Timers.FrameTimer.Elapsed.TotalMilliseconds world.Timers.PhysicsTimer.Elapsed.TotalMilliseconds] world
             World.doText "TelemetryTopology"
                 [Entity.Position .= v3 0f 145f 0f
@@ -244,6 +264,8 @@ type Scene01_BlobboThrowDispatcher () =
                  Entity.Elevation .= 10f
                  Entity.FontSizing .= Some 8f
                  Entity.Justification .= Justified (JustifyLeft, JustifyMiddle)
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.TextColor .= Color.White
                  Entity.Text @= sprintf "logical bodies %d joints %d | expected baseline 100/656 | engine totals unavailable" logicalBodyCount logicalJointCount] world
             World.doText "TelemetryPointer"
                 [Entity.Position .= v3 0f 125f 0f
@@ -251,6 +273,8 @@ type Scene01_BlobboThrowDispatcher () =
                  Entity.Elevation .= 10f
                  Entity.FontSizing .= Some 8f
                  Entity.Justification .= Justified (JustifyLeft, JustifyMiddle)
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.TextColor .= Color.White
                  Entity.Text @= sprintf "pointer (%.1f, %.1f) v (%.1f, %.1f) px/s @60Hz | held %b extension %.1f | force unavailable" mousePosition.X mousePosition.Y pointerVelocity.X pointerVelocity.Y held extension] world
             World.doText "TelemetryBlobbo"
                 [Entity.Position .= v3 0f 105f 0f
@@ -258,11 +282,25 @@ type Scene01_BlobboThrowDispatcher () =
                  Entity.Elevation .= 10f
                  Entity.FontSizing .= Some 8f
                  Entity.Justification .= Justified (JustifyLeft, JustifyMiddle)
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.TextColor .= Color.White
                  Entity.Text @= sprintf "Blobbo v (%.2f, %.2f) a %.2f | settle %s | water %d | fluid %d/%d | resets %d" center.BodyLinearVelocity.X center.BodyLinearVelocity.Y angularSpeed settleText (blobbo.GetWaterContent world) fluidParticleCount configuration.FluidParticleCap telemetry.ResetCount] world
+
+            World.doText "Instructions"
+                [Entity.Position .= v3 0.0f 82.0f 0.0f
+                 Entity.Size .= v3 620.0f 20.0f 0.0f
+                 Entity.Absolute .= true
+                 Entity.Elevation .= 10.0f
+                 Entity.BackdropImageOpt .= Some Assets.Default.Label
+                 Entity.FontSizing .= Some 8.0f
+                 Entity.Justification .= Justified (JustifyCenter, JustifyMiddle)
+                 Entity.Text @= (if world.TimeAdvancing then "Drag Blobbo to throw | hold `: water | Space: pause | Enter: revive | R: reset"
+                                 else "PAUSED | release is cancelled | Resume (Space) to interact") ] world
 
             if World.doButton "Reset"
                 [Entity.Position .= v3 104f -144f 0f
                  Entity.Elevation .= 10f
+                 Entity.FontSizing .= Some 8f
                  Entity.Text .= "Reset (R)"] world ||
                World.isKeyboardKeyPressed KeyboardKey.R world then
                 screen.SetHeldEntity Address.empty world
@@ -273,7 +311,11 @@ type Scene01_BlobboThrowDispatcher () =
                 screen.SetScene01Telemetry nextTelemetry world
 
             // declare quit button
-            if World.doButton "Quit" [Entity.Position .= v3 232.0f -144.0f 0.0f; Entity.Text .= "Quit"; Entity.Elevation .= 10f] world then
+            if World.doButton "Quit"
+                [Entity.Position .= v3 232.0f -144.0f 0.0f
+                 Entity.FontSizing .= Some 8f
+                 Entity.Text .= "Quit"
+                 Entity.Elevation .= 10f] world then
                 screen.SetGameplayState Quit world
 
             World.endGroup world

@@ -6,7 +6,10 @@
 
 `Projects/Blobbo and Chrono/` is the actual game. It owns production gameplay, domain state, generated-world architecture, shipping assets, saves, platform adapters, and behavior that has passed promotion gates.
 
-`Projects/Blobbo Playground/` is a separate executable laboratory for isolated gameplay experiments. The actual game must not reference its assembly or load its assets. A selected experiment is moved, distilled, or reimplemented under production ownership before the game uses it.
+`Projects/Blobbo Playground/` is a separate executable laboratory for isolated comparisons and combined
+interaction experiments under the 2026-09-12 plan amendment. The actual game must not reference its
+assembly or load its assets. A selected experiment is moved, distilled, or reimplemented under production
+ownership before the game uses it.
 
 Automated deterministic tests should eventually live in a separate Blobbo-specific test project referencing the smallest justified production code. The playground remains interactive because control feel, rendering, and whole-scene physics cannot be reduced to unit tests.
 
@@ -48,9 +51,9 @@ Nu remains the host for the window, render loop, and lifecycle. `CompositionRoot
 * **Audio.** `AudioIngress.Submit` accepts mono 48 kHz analysis samples, copies them into bounded, preallocated analysis and playback rings, and advances an authoritative `int64` source-sample clock. Each slot carries its absolute start position and valid count; producers drop new blocks under backpressure and consumers detect discontinuities. Playback timing uses the same mono clock; a future stereo adapter may interleave playback samples. `CompositionRoot.TryReadPlayback` exposes an allocation-free, non-blocking count/absolute-position drain for the private delayed-playback ring.
 * **MuScriptor seam.** `MuScriptorCoordinator` consumes independent five-second windows with 300 ms overlap and emits sample-positioned symbolic events. Defaults are `prelude_forcing=false`, beam 1, batch 1. `ISymbolicInference` is a placeholder seam for a future model and has no runtime dependency today.
 * **Simulation shell.** `SimulationWorker` currently translates symbolic events into immutable render snapshots. Rendering reads the latest snapshot without taking a lock.
-* **Scene composition.** `Gameplay.fs` loads the Nu-native `Assets/Gameplay/Scene.nugroup`, renders a temporary static model and diagnostic button, and does not yet contain the production Blobbo journey loop.
+* **Scene composition.** `Gameplay.fs` loads the Nu-native `Assets/Gameplay/Scene.nugroup`, renders a temporary static model and live read-only diagnostic text, and does not yet contain the production Blobbo journey loop.
 
-`NullBrowserBridge` and `NullInference` make the shell build and run offline. Failure and overload are isolated to the corresponding bounded queue; platform browser/audio/model adapters, click-through focus policy, and native compositing remain to be implemented per platform. The desktop shell already requests SDL transparent and always-on-top window flags. Start/stop operations are idempotent and serialized; worker shutdown joins fully. A future inference adapter that cannot be interrupted must be treated as a non-restartable fault.
+`NullBrowserBridge` and `NullInference` make the shell build and run offline. Failure and overload are isolated to the corresponding bounded queue; platform browser/audio/model adapters, click-through focus policy, and native compositing remain to be implemented per platform. The current desktop shell uses an ordinary opaque window. On 2026-09-12, interactive validation found that the prematurely enabled transparent/always-on-top flags exposed unrelated desktop content through UI text. Those flags are deferred until a platform compositor and focus policy can be validated together; this does not implement or reject the intended browser-overlay route. Actual maximize/fullscreen interaction also showed stale or duplicated rendering; the root cause is not established, so the participant path remains fixed-size while that window path is reviewed. Start/stop operations are idempotent and serialized; worker shutdown joins fully. A future inference adapter that cannot be interrupted must be treated as a non-restartable fault.
 
 ### 2026-09-11 source-review clarification
 

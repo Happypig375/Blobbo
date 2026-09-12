@@ -12,7 +12,7 @@ Before changing this project:
 4. Treat every playground scene as a controlled experiment, not automatic production architecture.
 5. State or preserve the experiment's hypothesis, comparison variants, controlled conditions, telemetry, deterministic reset/fixture, and acceptance evidence.
 6. Preserve the existing baseline behind configuration when comparing bodies, controls, rewind, water, obstacles, or presentation.
-7. Prefer one uncertain gameplay element or one comparison axis per scene. Split experiments whose combined systems prevent a clear conclusion.
+7. Prefer one uncertain gameplay element or one comparison axis per focused scene. For the integrated interaction playtest authorized in the plan's 2026-09-12 amendment, make the existing mechanics available in one accessible playtest and combine relevant mechanics in purposeful interaction scenarios. Room switching is welcome; do not force every prototype into one physical room. Preserve isolated scenes as controls. Integrated feedback does not replace the controlled M1 comparison or its human gate.
 8. Add bounded telemetry, deterministic reset/replay fixtures, and explicit evidence before drawing conclusions.
 9. Do not promote an experiment to `../Blobbo and Chrono/` until the relevant code-ready and human gates in the plan are satisfied.
 10. When an experiment is promoted, move or reimplement the minimum selected behavior under production ownership. The actual game must never add a project reference to this project or load assets from it.
